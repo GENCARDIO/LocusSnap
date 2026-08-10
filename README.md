@@ -859,14 +859,15 @@ matrix above.
 ## Releasing to PyPI
 
 [.github/workflows/publish.yml](.github/workflows/publish.yml) publishes a
-new release automatically when a `vX.Y.Z` tag is pushed:
+new release automatically when a tag matching `X.Y.Z` or `vX.Y.Z` is pushed
+(both are accepted, matching this repo's existing tag history):
 
 ```bash
 # 1. bump the version (single source of truth for the whole package)
 #    in pyproject.toml, e.g. version = "0.3.0"
 git commit -am "Release 0.3.0"
-git tag v0.3.0
-git push origin main v0.3.0
+git tag 0.3.0
+git push origin main 0.3.0
 ```
 
 The workflow runs the full test suite first; publishing only proceeds if it
