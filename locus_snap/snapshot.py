@@ -21,6 +21,7 @@ from locus_snap.mate_window import MateWindow, choose_mate_window, supporting_qu
 from locus_snap.metrics import RegionSummary, format_summary_table, summarize, write_tsv
 from locus_snap.read_model import AlignedRead, fetch_reads, matches_only, open_alignment_file
 from locus_snap.reference import ReferenceWindow
+from locus_snap.track_plugin import PluginTrackSource
 from locus_snap.render import (
     AlignmentRenderer,
     DEFAULT_COVERAGE_VAF_THRESHOLD,
@@ -107,6 +108,7 @@ class BamSnapshot:
         display_mode: str = "expand",
         max_alignment_depth: int = DEFAULT_MAX_ALIGNMENT_DEPTH,
         annotation_sources: Optional[List[AnnotationSource]] = None,
+        plugin_tracks: Optional[List[PluginTrackSource]] = None,
         show_ideogram: bool = True,
         show_center_guide: bool = False,
         show_sashimi: bool = False,
@@ -136,6 +138,10 @@ class BamSnapshot:
         highlight_color: str = "#ffd54f",
         highlight_alpha: float = 0.20,
         title_align: str = "left",
+        long_read_mode: bool = False,
+        show_base_modifications: bool = False,
+        modification_codes: Optional[List[str]] = None,
+        min_mod_probability: float = 0.5,
     ):
         self.bam = bam
         self.chrom = chrom
@@ -181,6 +187,7 @@ class BamSnapshot:
         self.display_mode = display_mode
         self.max_alignment_depth = max_alignment_depth
         self.annotation_sources = list(annotation_sources or [])
+        self.annotation_sources.extend(plugin_tracks or [])
         self.show_ideogram = show_ideogram
         self.show_center_guide = show_center_guide
         self.show_sashimi = show_sashimi
@@ -204,6 +211,10 @@ class BamSnapshot:
         self.tag_filter = list(tag_filter or [])
         self.tag_label = tag_label
         self.tag_colors = dict(tag_colors or {})
+        self.long_read_mode = long_read_mode
+        self.show_base_modifications = show_base_modifications
+        self.modification_codes = list(modification_codes or [])
+        self.min_mod_probability = min_mod_probability
 
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -250,6 +261,7 @@ class BamSnapshot:
             haplotype_filter=self.haplotype_filter,
             read_tag=self.read_tag,
             tag_filter=self.tag_filter,
+            parse_base_modifications=self.show_base_modifications,
         )
         self.reads = []
         for read in self.source_reads:
@@ -330,6 +342,10 @@ class BamSnapshot:
             show_sashimi=self.show_sashimi,
             min_junction_reads=self.min_junction_reads,
             sashimi_strand=self.sashimi_strand,
+            long_read_mode=self.long_read_mode,
+            show_base_modifications=self.show_base_modifications,
+            modification_codes=self.modification_codes,
+            min_mod_probability=self.min_mod_probability,
         )
         sort_label = self.sort_by
         if self.sort_by == "base":
@@ -370,6 +386,7 @@ class BamSnapshot:
                 haplotype_filter=self.haplotype_filter,
                 read_tag=self.read_tag,
                 tag_filter=self.tag_filter,
+                parse_base_modifications=self.show_base_modifications,
             )
             support_names = supporting_query_names(
                 self.source_reads, self.mate_window_source, mate.chrom, self.min_softclip
@@ -524,6 +541,7 @@ def render_multi_locus_snapshots(
     display_mode: str = "expand",
     max_alignment_depth: int = DEFAULT_MAX_ALIGNMENT_DEPTH,
     annotation_sources: Optional[List[AnnotationSource]] = None,
+    plugin_tracks: Optional[List[PluginTrackSource]] = None,
     show_ideogram: bool = True,
     show_center_guide: bool = False,
     show_sashimi: bool = False,
@@ -555,6 +573,10 @@ def render_multi_locus_snapshots(
     highlight_alpha: float = 0.20,
     title_align: str = "left",
     link_breakpoints: bool = False,
+    long_read_mode: bool = False,
+    show_base_modifications: bool = False,
+    modification_codes: Optional[List[str]] = None,
+    min_mod_probability: float = 0.5,
 ) -> tuple[str, str]:
     """Render two or more explicit loci as columns for one or more BAMs."""
     if len(regions) < 2:
@@ -602,6 +624,8 @@ def render_multi_locus_snapshots(
             display_mode="collapse", track_colors=theme_track_colors,
         ))
 
+    all_track_sources = list(annotation_sources or [])
+    all_track_sources.extend(plugin_tracks or [])
     loci = []
     summaries = []
     for locus_index, (chrom, start, end) in enumerate(regions):
@@ -613,7 +637,7 @@ def render_multi_locus_snapshots(
             reference.base_at(base_position) if base_position is not None else None
         )
         genomic_tracks = [
-            source.fetch(chrom, start, end) for source in annotation_sources or []
+            source.fetch(chrom, start, end) for source in all_track_sources
         ]
         samples = []
         for sample_index, bam_path in enumerate(bam_paths):
@@ -627,6 +651,7 @@ def render_multi_locus_snapshots(
                 min_softclip=min_softclip, haplotype_tag=haplotype_tag,
                 phase_set_tag=phase_set_tag, haplotype_filter=haplotype_filter,
                 read_tag=read_tag, tag_filter=tag_filter,
+                parse_base_modifications=show_base_modifications,
             )
             sample_reference_base = reference_base
             if sort_by == "base" and sample_reference_base not in ("A", "C", "G", "T"):
@@ -714,6 +739,10 @@ def render_multi_locus_snapshots(
         sort_base_position=None, sort_reference_base=None,
         show_center_guide=show_center_guide, show_sashimi=show_sashimi,
         min_junction_reads=min_junction_reads, sashimi_strand=sashimi_strand,
+        long_read_mode=long_read_mode,
+        show_base_modifications=show_base_modifications,
+        modification_codes=modification_codes,
+        min_mod_probability=min_mod_probability,
     )
     renderer.render_multi_loci(
         loci=loci, out_path=out_path,
@@ -768,6 +797,7 @@ def compare_snapshots(
     display_mode: str = "expand",
     max_alignment_depth: int = DEFAULT_MAX_ALIGNMENT_DEPTH,
     annotation_sources: Optional[List[AnnotationSource]] = None,
+    plugin_tracks: Optional[List[PluginTrackSource]] = None,
     show_ideogram: bool = True,
     show_center_guide: bool = False,
     show_sashimi: bool = False,
@@ -801,6 +831,10 @@ def compare_snapshots(
     highlight_alpha: float = 0.20,
     title_align: str = "left",
     result_summaries: Optional[List[RegionSummary]] = None,
+    long_read_mode: bool = False,
+    show_base_modifications: bool = False,
+    modification_codes: Optional[List[str]] = None,
+    min_mod_probability: float = 0.5,
 ) -> tuple[str, str]:
     """Render two or more BAMs as sample panels sharing one genomic x-axis.
 
@@ -840,8 +874,10 @@ def compare_snapshots(
         )
     else:
         cytobands = {}
+    all_track_sources = list(annotation_sources or [])
+    all_track_sources.extend(plugin_tracks or [])
     genomic_tracks = []
-    for source in annotation_sources or []:
+    for source in all_track_sources:
         genomic_tracks.append(source.fetch(chrom, start, end))
 
     panels = []
@@ -857,6 +893,7 @@ def compare_snapshots(
             haplotype_tag=haplotype_tag, phase_set_tag=phase_set_tag,
             haplotype_filter=haplotype_filter,
             read_tag=read_tag, tag_filter=tag_filter,
+            parse_base_modifications=show_base_modifications,
         )
         if sort_by == "base" and reference_base not in ("A", "C", "G", "T"):
             reference_base = infer_reference_base(reads, base_position)
@@ -941,6 +978,10 @@ def compare_snapshots(
         show_sashimi=show_sashimi,
         min_junction_reads=min_junction_reads,
         sashimi_strand=sashimi_strand,
+        long_read_mode=long_read_mode,
+        show_base_modifications=show_base_modifications,
+        modification_codes=modification_codes,
+        min_mod_probability=min_mod_probability,
     )
     renderer.render_multi(
         panels=panels, chrom=chrom, window_start=start, window_end=end,

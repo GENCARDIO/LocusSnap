@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate the deterministic BAM and tabix files used by demo figures."""
 from dataclasses import dataclass
+from array import array
 from math import exp, log2
 from pathlib import Path
 from random import Random
@@ -19,6 +20,7 @@ SIGNALS_DIR = DEMO_DATA_DIR / "signals"
 VARIANTS_DIR = DEMO_DATA_DIR / "variants"
 REFERENCE_PATH = REFERENCE_DIR / "demo_reference.fa"
 CNV_REFERENCE_PATH = REFERENCE_DIR / "demo_cnv_reference.fa"
+LONG_REFERENCE_PATH = REFERENCE_DIR / "demo_long_reference.fa"
 
 CNV_CHROM = "chrCNV"
 CNV_LENGTH = 80_000
@@ -26,6 +28,8 @@ CNV_READ_LENGTH = 150
 CNV_BASELINE_DEPTH = 30.0
 CNV_TUMOUR_PURITY = 0.75
 SEQUENCING_ERROR_RATE = 0.0015
+LONG_CHROM = "chrLong"
+LONG_LENGTH = 12_000
 
 
 @dataclass(frozen=True)
@@ -241,6 +245,133 @@ def write_small_reference(path: Path) -> str:
         index_path.unlink()
     pysam.faidx(str(path))
     return sequence
+
+
+def reverse_complement(sequence: str) -> str:
+    return sequence.translate(str.maketrans("ACGT", "TGCA"))[::-1]
+
+
+def write_long_reference(path: Path) -> str:
+    """Write a GC-balanced synthetic locus for ONT-style long reads."""
+    rng = Random(88_021)
+    sequence = "".join(rng.choices("ACGT", weights=(26, 24, 24, 26), k=LONG_LENGTH))
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(f">{LONG_CHROM}\n")
+        for offset in range(0, len(sequence), 80):
+            handle.write(sequence[offset:offset + 80] + "\n")
+    index_path = Path(f"{path}.fai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.faidx(str(path))
+    return sequence
+
+
+def encode_modification_deltas(sequence: str, canonical_base: str, selected) -> list[int]:
+    """Encode selected query indices as SAM MM canonical-base deltas."""
+    canonical_positions = [
+        index for index, base in enumerate(sequence) if base == canonical_base
+    ]
+    ordinal_by_position = {
+        position: ordinal for ordinal, position in enumerate(canonical_positions)
+    }
+    deltas = []
+    previous_ordinal = -1
+    for position in sorted(selected):
+        ordinal = ordinal_by_position[position]
+        deltas.append(ordinal - previous_ordinal - 1)
+        previous_ordinal = ordinal
+    return deltas
+
+
+def write_long_read_bam(path: Path, reference: str) -> None:
+    """Simulate ONT-like reads with indels, sparse errors, and MM/ML calls."""
+    header = pysam.AlignmentHeader.from_dict({
+        "HD": {"VN": "1.6", "SO": "coordinate"},
+        "SQ": [{"SN": LONG_CHROM, "LN": len(reference)}],
+        "RG": [{"ID": "ONT", "SM": "Long_read_modifications", "PL": "ONT"}],
+    })
+    rng = Random(88_022)
+    reads = []
+    for read_index in range(26):
+        start = 2200 + rng.randint(0, 1900)
+        aligned_span = rng.randint(3600, 5200)
+        end = min(start + aligned_span, len(reference) - 50)
+        aligned_span = end - start
+        event_position = rng.randint(900, max(901, aligned_span - 900))
+        event_length = rng.randint(3, 18)
+        if read_index % 3 == 0:
+            left = reference[start:start + event_position]
+            inserted = "".join(rng.choices("ACGT", k=event_length))
+            right = reference[start + event_position:end]
+            sequence = list(left + inserted + right)
+            cigar = [(0, event_position), (1, event_length), (0, aligned_span - event_position)]
+        elif read_index % 3 == 1:
+            deletion_length = min(event_length, aligned_span - event_position - 1)
+            left = reference[start:start + event_position]
+            right = reference[start + event_position + deletion_length:end]
+            sequence = list(left + right)
+            cigar = [
+                (0, event_position), (2, deletion_length),
+                (0, aligned_span - event_position - deletion_length),
+            ]
+        else:
+            sequence = list(reference[start:end])
+            cigar = [(0, aligned_span)]
+
+        qualities = [max(18, min(40, round(rng.gauss(31, 4)))) for _ in sequence]
+        add_sequencing_errors(sequence, qualities, rng, 0.0035)
+        stored_sequence = "".join(sequence)
+        reverse = read_index % 4 == 1
+        original_sequence = reverse_complement(stored_sequence) if reverse else stored_sequence
+
+        c_candidates = [
+            index for index in range(len(original_sequence) - 1)
+            if original_sequence[index:index + 2] == "CG"
+        ]
+        a_candidates = [
+            index for index, base in enumerate(original_sequence) if base == "A"
+        ]
+        c_selected = [
+            position for position in c_candidates
+            if rng.random() < (0.42 if read_index < 14 else 0.18)
+        ]
+        a_selected = [position for position in a_candidates if rng.random() < 0.012]
+        mm_groups = []
+        ml_values = []
+        if c_selected:
+            deltas = encode_modification_deltas(original_sequence, "C", c_selected)
+            mm_groups.append("C+m.," + ",".join(str(value) for value in deltas) + ";")
+            ml_values.extend(rng.randint(185, 255) for _ in c_selected)
+        if a_selected:
+            deltas = encode_modification_deltas(original_sequence, "A", a_selected)
+            mm_groups.append("A+a.," + ",".join(str(value) for value in deltas) + ";")
+            ml_values.extend(rng.randint(165, 245) for _ in a_selected)
+
+        read = pysam.AlignedSegment(header)
+        read.query_name = f"ont_read_{read_index + 1:03d}"
+        read.query_sequence = stored_sequence
+        read.flag = (16 if reverse else 0) | (2048 if read_index in (6, 19) else 0)
+        read.reference_id = 0
+        read.reference_start = start
+        read.mapping_quality = max(20, min(60, round(rng.gauss(52, 7))))
+        read.cigar = cigar
+        read.query_qualities = qualities
+        read.set_tag("RG", "ONT")
+        if mm_groups:
+            read.set_tag("MM", "".join(mm_groups))
+            read.set_tag("ML", array("B", ml_values))
+        if read.is_supplementary:
+            read.set_tag("SA", f"{LONG_CHROM},{start + 2401},+,1200M,40,8;")
+        reads.append(read)
+
+    reads.sort(key=lambda read: (read.reference_start, read.query_name))
+    with pysam.AlignmentFile(str(path), "wb", header=header) as bam:
+        for read in reads:
+            bam.write(read)
+    index_path = Path(f"{path}.bai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.index(str(path))
 
 
 def write_small_variant_vcf(
@@ -883,6 +1014,50 @@ def write_multi_sample_review_regions(path: Path) -> None:
     )
 
 
+def write_hic_tracks(tad_path: Path, loop_path: Path, contact_path: Path) -> None:
+    """Write nested TAD calls, loop calls, and a binned contact map."""
+    tad_path.write_text(
+        "chrDemo\t0\t125\tTAD-A\t0.78\n"
+        "chrDemo\t125\t275\tTAD-B\t0.96\n"
+        "chrDemo\t150\t230\tSubTAD-B1\t0.64\n"
+        "chrDemo\t275\t400\tTAD-C\t0.83\n",
+        encoding="utf-8",
+    )
+    loop_path.write_text(
+        "chrDemo\t18\t28\tchrDemo\t102\t112\tA-boundary\t18\n"
+        "chrDemo\t62\t72\tchrDemo\t172\t182\tA-B contact\t9\n"
+        "chrDemo\t132\t142\tchrDemo\t258\t268\tB-boundary\t30\n"
+        "chrDemo\t158\t168\tchrDemo\t218\t228\tSubTAD loop\t24\n"
+        "chrDemo\t286\t296\tchrDemo\t374\t384\tC-boundary\t16\n",
+        encoding="utf-8",
+    )
+    loop_boosts = {
+        (1, 5): 32.0, (3, 8): 18.0, (7, 13): 40.0,
+        (8, 11): 34.0, (14, 19): 26.0,
+    }
+    contact_lines = []
+    bin_size = 20
+    bin_count = 20
+    for first_bin in range(bin_count):
+        first_midpoint = first_bin * bin_size + bin_size / 2
+        first_domain = 0 if first_midpoint < 125 else (1 if first_midpoint < 275 else 2)
+        for second_bin in range(first_bin, bin_count):
+            second_midpoint = second_bin * bin_size + bin_size / 2
+            second_domain = 0 if second_midpoint < 125 else (1 if second_midpoint < 275 else 2)
+            distance = second_bin - first_bin
+            score = 82.0 * exp(-distance / 2.7)
+            score *= 1.30 if first_domain == second_domain else 0.42
+            score += loop_boosts.get((first_bin, second_bin), 0.0)
+            score += ((first_bin * 7 + second_bin * 11) % 5) * 0.7
+            start1 = first_bin * bin_size
+            start2 = second_bin * bin_size
+            contact_lines.append(
+                f"chrDemo\t{start1}\t{start1 + bin_size}\t"
+                f"chrDemo\t{start2}\t{start2 + bin_size}\t.\t{score:.3f}\n"
+            )
+    contact_path.write_text("".join(contact_lines), encoding="utf-8")
+
+
 def main() -> None:
     ensure_demo_directories()
     tumour_profile = {
@@ -894,6 +1069,10 @@ def main() -> None:
         104: 0.24, 118: 0.51, 145: 0.64, 158: 0.43, 169: 0.33,
     }
     small_reference = write_small_reference(REFERENCE_PATH)
+    long_reference = write_long_reference(LONG_REFERENCE_PATH)
+    write_long_read_bam(
+        ALIGNMENTS_DIR / "demo_long_reads.bam", long_reference
+    )
     write_small_variant_vcf(
         VARIANTS_DIR / "demo_tumour.vcf", small_reference,
         tumour_profile, "T",
@@ -936,6 +1115,11 @@ def main() -> None:
     write_structural_variant_vcf(VARIANTS_DIR / "demo_structural_variants.vcf")
     write_multi_sample_review_regions(
         ANNOTATIONS_DIR / "demo_multi_sample_review.bed"
+    )
+    write_hic_tracks(
+        ANNOTATIONS_DIR / "demo_hic_domains.tad",
+        ANNOTATIONS_DIR / "demo_hic_loops.bedpe",
+        ANNOTATIONS_DIR / "demo_hic_contacts.bedpe",
     )
 
     write_chip_signal(

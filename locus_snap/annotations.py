@@ -1,4 +1,4 @@
-"""Read interval, gene, variant, and copy-number annotation tracks."""
+"""Read interval, gene, variant, copy-number, and Hi-C feature tracks."""
 from __future__ import annotations
 
 import csv
@@ -17,13 +17,17 @@ from locus_snap.config import DEFAULT_TRACK_COLORS
 
 SUPPORTED_TRACK_FORMATS = (
     "bed", "gff", "gff3", "gtf", "vcf", "seg", "bedgraph", "bdg", "log2", "cnv",
-    "narrowpeak", "broadpeak", "peak", "signal",
+    "narrowpeak", "broadpeak", "peak", "signal", "tad", "bedpe",
 )
 CNV_TRACK_FORMATS = ("seg", "bedgraph", "bdg", "log2", "cnv")
 BAF_TRACK_FORMATS = ("baf",)
 PEAK_TRACK_FORMATS = ("narrowpeak", "broadpeak", "peak")
 SIGNAL_TRACK_FORMATS = ("signal",)
+TAD_TRACK_FORMATS = ("tad",)
+HIC_LOOP_TRACK_FORMATS = ("bedpe",)
+HIC_TRACK_FORMATS = TAD_TRACK_FORMATS + HIC_LOOP_TRACK_FORMATS
 ANNOTATION_DISPLAY_MODES = ("collapse", "pack", "expand", "density")
+HIC_DISPLAY_MODES = ("arcs", "triangle")
 PRIMARY_ISOFORM_MODES = ("all", "prefer", "only")
 COMPRESSED_SUFFIXES = (".gz", ".bgz", ".bgzf")
 TRANSCRIPT_TYPES = {"transcript", "mrna", "ncrna", "trna", "rrna"}
@@ -50,6 +54,9 @@ class AnnotationItem:
     primary_rank: Optional[int] = None
     primary_label: str = ""
     summit: Optional[int] = None
+    chrom2: str = ""
+    start2: Optional[int] = None
+    end2: Optional[int] = None
 
 
 @dataclass
@@ -62,6 +69,7 @@ class LoadedAnnotationTrack:
     display_mode: str = "pack"
     color_by_sign: bool = False
     height_in: Optional[float] = None
+    chrom: str = ""
 
 
 def default_label(path: str) -> str:
@@ -73,9 +81,10 @@ def default_label(path: str) -> str:
             lower = lower[:-len(suffix)]
             break
     for suffix in (
+        ".domains.bed", ".tad.bed", ".loops.bedpe",
         ".narrowpeak", ".broadpeak", ".bedgraph", ".signal", ".bigwig", ".bw",
         ".gff3", ".gff", ".gtf", ".bed", ".vcf", ".peak",
-        ".seg", ".bdg", ".log2", ".cnv",
+        ".seg", ".bdg", ".log2", ".cnv", ".tad", ".domains", ".bedpe",
     ):
         if lower.endswith(suffix):
             return name[:-len(suffix)]
@@ -88,7 +97,13 @@ def infer_track_format(path: str) -> str:
         if name.endswith(suffix):
             name = name[:-len(suffix)]
             break
+    if name.endswith((".tad.bed", ".domains.bed")):
+        return "tad"
+    if name.endswith(".loops.bedpe"):
+        return "bedpe"
     suffix = Path(name).suffix.lstrip(".")
+    if suffix in ("tad", "domains"):
+        return "tad"
     if suffix == "bdg":
         return "bedgraph"
     if suffix in ("bw", "bigwig"):
@@ -101,7 +116,7 @@ def infer_track_format(path: str) -> str:
         raise ValueError(
             f"Cannot infer annotation format for '{path}'. Expected .bed, .gff, .gff3, .gtf, "
             ".vcf, .narrowPeak, .broadPeak, .peak, .signal, .bigwig/.bw, .seg, "
-            ".bedgraph/.bdg, .log2, or .cnv"
+            ".bedgraph/.bdg, .log2, .cnv, .tad/.domains, or .bedpe"
             " (optionally followed by .gz/.bgz/.bgzf)."
         )
     return suffix
@@ -466,6 +481,87 @@ def parse_bedgraph(
     return items
 
 
+def parse_tad(
+    lines: Iterable[str], chrom: str, start: int, end: int
+) -> List[AnnotationItem]:
+    """Parse BED-like, zero-based TAD intervals with optional name and score."""
+    items = []
+    for line in lines:
+        fields = line.rstrip().split("\t")
+        if len(fields) < 3:
+            fields = line.split()
+        if len(fields) < 3 or fields[0] != chrom:
+            continue
+        try:
+            domain_start, domain_end = int(fields[1]), int(fields[2])
+        except ValueError as exc:
+            raise ValueError(f"Invalid TAD coordinates: {line.rstrip()}") from exc
+        if domain_end <= domain_start:
+            raise ValueError(f"TAD interval end must exceed start: {line.rstrip()}")
+        if domain_end <= start or domain_start >= end:
+            continue
+        name = fields[3] if len(fields) > 3 and fields[3] != "." else ""
+        value = None
+        if len(fields) > 4 and fields[4] not in ("", ".", "NA", "nan"):
+            try:
+                value = float(fields[4])
+            except ValueError as exc:
+                raise ValueError(f"Invalid TAD score: {line.rstrip()}") from exc
+            if not isfinite(value):
+                value = None
+        items.append(AnnotationItem(
+            domain_start, domain_end, name=name,
+            blocks=[(domain_start, domain_end)], value=value,
+        ))
+    return items
+
+
+def parse_bedpe(
+    lines: Iterable[str], chrom: str, start: int, end: int
+) -> List[AnnotationItem]:
+    """Parse BEDPE Hi-C loops, retaining cis and visible trans contacts."""
+    items = []
+    for line in lines:
+        fields = line.rstrip().split("\t")
+        if len(fields) < 6:
+            fields = line.split()
+        if len(fields) < 6:
+            continue
+        chrom1, chrom2 = fields[0], fields[3]
+        try:
+            start1, end1 = int(fields[1]), int(fields[2])
+            start2, end2 = int(fields[4]), int(fields[5])
+        except ValueError as exc:
+            raise ValueError(f"Invalid BEDPE coordinates: {line.rstrip()}") from exc
+        if end1 <= start1 or end2 <= start2:
+            raise ValueError(f"BEDPE anchor end must exceed start: {line.rstrip()}")
+
+        anchor1_visible = chrom1 == chrom and end1 > start and start1 < end
+        anchor2_visible = chrom2 == chrom and end2 > start and start2 < end
+        cis_span_visible = (
+            chrom1 == chrom2 == chrom
+            and max(end1, end2) > start
+            and min(start1, start2) < end
+        )
+        if not (anchor1_visible or anchor2_visible or cis_span_visible):
+            continue
+
+        name = fields[6] if len(fields) > 6 and fields[6] != "." else ""
+        value = None
+        if len(fields) > 7 and fields[7] not in ("", ".", "NA", "nan"):
+            try:
+                value = float(fields[7])
+            except ValueError as exc:
+                raise ValueError(f"Invalid BEDPE score: {line.rstrip()}") from exc
+            if not isfinite(value):
+                value = None
+        items.append(AnnotationItem(
+            start1, end1, name=name, blocks=[(start1, end1)], value=value,
+            group=chrom1, chrom2=chrom2, start2=start2, end2=end2,
+        ))
+    return items
+
+
 def parse_peak(
     lines: Iterable[str], chrom: str, start: int, end: int, kind: str
 ) -> List[AnnotationItem]:
@@ -794,15 +890,28 @@ class AnnotationSource:
             explicit_kind = None
         if explicit_kind == "bdg":
             explicit_kind = "bedgraph"
+        if explicit_kind in ("domains", "domain"):
+            explicit_kind = "tad"
+        if explicit_kind in ("loop", "loops", "hicloops"):
+            explicit_kind = "bedpe"
         if explicit_kind in ("bigwig", "bw"):
             explicit_kind = "signal"
         if explicit_kind is not None and explicit_kind not in SUPPORTED_TRACK_FORMATS:
             raise ValueError(
                 f"Unsupported annotation type '{kind}'. Choose bed, gff, gff3, gtf, vcf, "
-                "narrowpeak, broadpeak, peak, signal, seg, bedgraph, log2, cnv, or auto."
+                "narrowpeak, broadpeak, peak, signal, seg, bedgraph, log2, cnv, tad, "
+                "bedpe, or auto."
             )
         self.kind = explicit_kind or infer_track_format(self.path)
-        if display_mode not in ANNOTATION_DISPLAY_MODES:
+        if self.kind in HIC_LOOP_TRACK_FORMATS:
+            if display_mode in ("collapse", "pack", "expand"):
+                display_mode = "arcs"
+            elif display_mode not in HIC_DISPLAY_MODES:
+                raise ValueError(
+                    f"Unsupported BEDPE display mode '{display_mode}'. Choose "
+                    f"{', '.join(HIC_DISPLAY_MODES)}."
+                )
+        elif display_mode not in ANNOTATION_DISPLAY_MODES:
             raise ValueError(
                 f"Unsupported annotation display mode '{display_mode}'. Choose "
                 f"{', '.join(ANNOTATION_DISPLAY_MODES)}."
@@ -832,6 +941,10 @@ class AnnotationSource:
             self.color = colors["signal"]
         elif self.kind in CNV_TRACK_FORMATS:
             self.color = colors["cnv"]
+        elif self.kind in TAD_TRACK_FORMATS:
+            self.color = colors["tad"]
+        elif self.kind in HIC_LOOP_TRACK_FORMATS:
+            self.color = colors["hic_loop"]
         else:
             self.color = colors["gene"]
         self.compressed = Path(self.path).name.lower().endswith(COMPRESSED_SUFFIXES)
@@ -942,6 +1055,10 @@ class AnnotationSource:
                 items = parse_peak(lines, chrom, start, end, self.kind)
             elif self.kind in ("seg", "cnv"):
                 items = parse_seg(lines, chrom, start, end)
+            elif self.kind in TAD_TRACK_FORMATS:
+                items = parse_tad(lines, chrom, start, end)
+            elif self.kind in HIC_LOOP_TRACK_FORMATS:
+                items = parse_bedpe(lines, chrom, start, end)
             else:
                 items = parse_gff(lines, chrom, start, end)
         if self.kind in SIGNAL_TRACK_FORMATS:
@@ -957,6 +1074,7 @@ class AnnotationSource:
             self.kind in CNV_TRACK_FORMATS
             or self.kind in PEAK_TRACK_FORMATS
             or self.kind in SIGNAL_TRACK_FORMATS
+            or self.kind in HIC_TRACK_FORMATS
             or self.display_mode == "density"
         ):
             rows = [items] if items else []
@@ -975,6 +1093,7 @@ class AnnotationSource:
             label=self.label, kind=self.kind, color=self.color,
             items=items, rows=rows, display_mode=self.display_mode,
             color_by_sign=self.color_by_sign, height_in=self.height_in,
+            chrom=chrom,
         )
 
 
@@ -1071,7 +1190,7 @@ class BafSource:
                 ))
         return LoadedAnnotationTrack(
             self.label, "baf", self.color, items,
-            [items] if items else [], "collapse",
+            [items] if items else [], "collapse", chrom=chrom,
         )
 
 

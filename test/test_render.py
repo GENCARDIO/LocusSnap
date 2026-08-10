@@ -5,20 +5,21 @@ from types import SimpleNamespace
 import matplotlib.pyplot as plt
 import pytest
 from matplotlib.colors import to_hex
-from matplotlib.patches import Polygon
+from matplotlib.patches import PathPatch, Polygon, Rectangle
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from locus_snap.annotations import AnnotationItem, LoadedAnnotationTrack
 from locus_snap.config import DEFAULT_BASE_COLORS, DEFAULT_VISUAL_COLORS, load_config
 from locus_snap.cytobands import Cytoband
-from locus_snap.read_model import CigarBlock
+from locus_snap.read_model import BaseModification, CigarBlock
 from locus_snap.render import (
     AlignmentRenderer,
     HighlightRegion,
     compute_coverage,
     compute_binned_coverage,
     compute_feature_density,
+    compute_modification_evidence,
     compute_sparse_snv_evidence,
     compute_snv_evidence,
     compute_snv_counts,
@@ -30,6 +31,42 @@ from locus_snap.render import (
     nice_scale_length,
     tag_color,
 )
+
+
+def test_modification_evidence_uses_canonical_base_depth():
+    reads = [
+        SimpleNamespace(
+            base_modifications=[BaseModification(10, 0, "C", 0, "m", 0.95)],
+            base_at=lambda position: "C" if position == 10 else None,
+        ),
+        SimpleNamespace(
+            base_modifications=[BaseModification(10, 0, "C", 0, "m", 0.25)],
+            base_at=lambda position: "C" if position == 10 else None,
+        ),
+        SimpleNamespace(
+            base_modifications=[],
+            base_at=lambda position: "C" if position == 10 else None,
+        ),
+    ]
+
+    evidence = compute_modification_evidence(
+        reads, 0, 20, minimum_probability=0.5
+    )["5mC"][10]
+
+    assert evidence.modified == 1
+    assert evidence.canonical_depth == 3
+    assert evidence.fraction == pytest.approx(1 / 3)
+
+
+def test_modification_filter_accepts_human_and_sam_codes():
+    read = SimpleNamespace(
+        base_modifications=[BaseModification(10, 0, "C", 0, "m", 0.95)],
+        base_at=lambda position: "C",
+    )
+
+    assert "5mC" in compute_modification_evidence([read], 0, 20, codes=["m"])
+    assert "5mC" in compute_modification_evidence([read], 0, 20, codes=["5mC"])
+    assert not compute_modification_evidence([read], 0, 20, codes=["6mA"])
 
 
 def test_feature_density_counts_interval_overlap_per_bin():
@@ -369,6 +406,98 @@ def test_density_track_draws_compact_filled_histogram():
     assert ax.get_ylabel() == "features/bin"
     assert any(text.get_text() == "density" for text in ax.texts)
     plt.close(fig)
+
+
+def test_tad_track_draws_domain_triangles_boundaries_and_labels():
+    items = [
+        AnnotationItem(100, 300, "TAD_A", value=5.0),
+        AnnotationItem(260, 480, "TAD_B", value=10.0),
+    ]
+    track = LoadedAnnotationTrack(
+        "Hi-C domains", "tad", "#a50f15", items, [items], "collapse"
+    )
+    renderer = AlignmentRenderer()
+    fig, ax = plt.subplots()
+
+    renderer.draw_annotation_track(ax, track, 90, 500)
+
+    assert sum(isinstance(patch, Polygon) for patch in ax.patches) == 2
+    assert len(ax.lines) == 4
+    assert {text.get_text() for text in ax.texts} >= {
+        "Hi-C domains", "TAD domains · boundary guides", "TAD_A", "TAD_B",
+    }
+    plt.close(fig)
+
+
+def test_bedpe_track_draws_score_scaled_arcs_anchors_and_trans_marker():
+    items = [
+        AnnotationItem(
+            100, 120, "loop_A", value=5.0, group="chr1",
+            chrom2="chr1", start2=300, end2=320,
+        ),
+        AnnotationItem(
+            150, 170, "trans_A", value=10.0, group="chr1",
+            chrom2="chr2", start2=155, end2=165,
+        ),
+    ]
+    track = LoadedAnnotationTrack(
+        "Hi-C loops", "bedpe", "#b2182b", items, [items], "collapse",
+        chrom="chr1",
+    )
+    renderer = AlignmentRenderer()
+    fig, ax = plt.subplots()
+
+    renderer.draw_annotation_track(ax, track, 90, 350)
+
+    assert sum(isinstance(patch, PathPatch) for patch in ax.patches) == 1
+    assert sum(isinstance(patch, Rectangle) for patch in ax.patches) == 3
+    assert len(ax.lines) == 1
+    assert {text.get_text() for text in ax.texts} >= {
+        "Hi-C loops", "Hi-C contacts · BEDPE anchors", "loop_A", "to chr2",
+    }
+    plt.close(fig)
+
+
+def test_bedpe_triangle_draws_red_white_score_scaled_contact_cells():
+    items = [
+        AnnotationItem(
+            100, 120, value=1.0, group="chr1",
+            chrom2="chr1", start2=200, end2=220,
+        ),
+        AnnotationItem(
+            120, 140, value=5.0, group="chr1",
+            chrom2="chr1", start2=240, end2=260,
+        ),
+        AnnotationItem(
+            180, 200, value=10.0, group="chr1",
+            chrom2="chr1", start2=300, end2=320,
+        ),
+    ]
+    track = LoadedAnnotationTrack(
+        "Contact map", "bedpe", "#b2182b", items, [items], "triangle",
+        chrom="chr1",
+    )
+    renderer = AlignmentRenderer()
+    fig, ax = plt.subplots()
+
+    renderer.draw_annotation_track(ax, track, 90, 350)
+
+    cells = [patch for patch in ax.patches if isinstance(patch, Polygon)]
+    assert len(cells) == 3
+    assert to_hex(cells[0].get_facecolor()) == "#fff5f0"
+    assert to_hex(cells[-1].get_facecolor()) == "#b2182b"
+    assert len(ax.lines) == 1
+    assert "Triangular Hi-C contact map · score intensity" in {
+        text.get_text() for text in ax.texts
+    }
+    plt.close(fig)
+
+
+def test_hic_tracks_use_dedicated_default_height():
+    track = LoadedAnnotationTrack("TADs", "tad", "#a50f15", [], [])
+    renderer = AlignmentRenderer()
+
+    assert renderer.annotation_track_height(track) == pytest.approx(1.20)
 
 
 def test_annotation_height_override_wins_over_type_default():

@@ -116,9 +116,9 @@
             <div class="feature-icon alignment-icon" aria-hidden="true"><span></span><span></span><span></span></div>
             <p class="card-kicker">Alignment evidence</p>
             <h3>See what the reads are saying</h3>
-            <p>Inspect concordant and discordant pairs, split reads, soft clips, gaps, insertions, and base mismatches with familiar IGV colours.</p>
+            <p>Inspect concordant and discordant pairs, long reads, split reads, soft clips, gaps, insertions, base mismatches, and MM/ML modifications with familiar evidence colours.</p>
             <ul class="tag-list" aria-label="Alignment features">
-              <li>View as pairs</li><li>Mate windows</li><li>Multi-locus views</li><li>Tag lanes</li><li>MAPQ shading</li><li>Read sorting</li>
+              <li>View as pairs</li><li>Long-read mode</li><li>MM/ML calls</li><li>Mate windows</li><li>Multi-locus views</li><li>Tag lanes</li><li>MAPQ shading</li><li>Read sorting</li>
             </ul>
           </article>
 
@@ -134,6 +134,13 @@
             <p class="card-kicker">Companion tracks</p>
             <h3>Genes and annotations</h3>
             <p>Add RefSeq isoforms, GTF/GFF, BED, VCF, peak, and signal tracks with configurable labels and heights.</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon tracks-icon" aria-hidden="true"><span></span><span></span><span></span></div>
+            <p class="card-kicker">Extension API v1</p>
+            <h3>Bring your own track</h3>
+            <p>Install a Python entry-point plugin and draw arbitrary data through a stable canvas while LocusSnap owns coordinates, grids, layout, and export.</p>
           </article>
 
           <article class="feature-card">
@@ -177,6 +184,16 @@
             <button class="gallery-card gallery-feature" type="button" data-gallery-image="assets/images/structural-variant-evidence.png" data-gallery-title="Explicit multi-locus breakpoint view">
               <span class="gallery-image"><img src="assets/images/structural-variant-evidence.png" alt="Explicit chr1 and chr2 translocation breakpoint loci with linked centres and reciprocal read evidence" width="2400" height="747" loading="lazy"></span>
               <span class="gallery-meta"><span><strong>Explicit multi-locus breakpoints</strong><small>Independent scales · linked loci · reciprocal pair and split-read evidence</small></span><i aria-hidden="true">↗</i></span>
+            </button>
+
+            <button class="gallery-card gallery-large" type="button" data-gallery-image="assets/images/long-read-modifications.png" data-gallery-title="Long reads and MM/ML base modifications">
+              <span class="gallery-image"><img src="assets/images/long-read-modifications.png" alt="ONT-style long reads coloured by strand with 5mC and 6mA markers and a modification fraction track" width="2100" height="697" loading="lazy"></span>
+              <span class="gallery-meta"><span><strong>Long reads and base modifications</strong><small>ONT/PacBio mode · MM/ML probabilities · 5mC and 6mA fractions</small></span><i aria-hidden="true">↗</i></span>
+            </button>
+
+            <button class="gallery-card gallery-large" type="button" data-gallery-image="assets/images/custom-track-plugin.png" data-gallery-title="Custom track plugin API">
+              <span class="gallery-image"><img src="assets/images/custom-track-plugin.png" alt="External GC-content plugin track rendered above LocusSnap coverage and alignments" width="2100" height="748" loading="lazy"></span>
+              <span class="gallery-meta"><span><strong>Custom track plugin API</strong><small>Entry-point discovery · stable canvas · core genomic layout</small></span><i aria-hidden="true">↗</i></span>
             </button>
 
             <button class="gallery-card" type="button" data-gallery-image="assets/images/close-zoom-softclipped-bases.png" data-gallery-title="Soft-clipped bases at close zoom">

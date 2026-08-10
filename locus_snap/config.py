@@ -32,6 +32,9 @@ DEFAULT_TRACK_COLORS = {
     "baf": "#7a1f5c",
     "peak": "#7b3294",
     "signal": "#2c7fb8",
+    "tad": "#a50f15",
+    "hic_loop": "#b2182b",
+    "hic_contact_low": "#fff5f0",
 }
 DEFAULT_VISUAL_COLORS = {
     "insertion": DEFAULT_INSERTION_COLOR,
@@ -66,6 +69,17 @@ DEFAULT_HAPLOTYPE_COLORS = {
 }
 DEFAULT_TAG_COLORS = {
     "untagged": "#9b9b96",
+}
+DEFAULT_LONG_READ_COLORS = {
+    "forward": "#4c78a8",
+    "reverse": "#e45756",
+    "supplementary": "#8a60a8",
+}
+DEFAULT_MODIFICATION_COLORS = {
+    "5mC": "#7a1f5c",
+    "5hmC": "#2c7fb8",
+    "6mA": "#e6862d",
+    "other": "#555555",
 }
 DEFAULT_CYTOBAND_COLORS = {
     "gneg": "#ffffff", "gpos25": "#c8c8c8", "gpos50": "#969696",
@@ -110,7 +124,9 @@ DEFAULT_STYLES = {
     "cnv_track_height_in": 1.15,
     "baf_track_height_in": 1.05,
     "peak_track_height_in": 1.05,
+    "hic_track_height_in": 1.20,
     "coverage_track_height_in": 1.40,
+    "modification_track_height_in": 1.05,
     "ideogram_height_in": 0.34,
     "panel_header_height_in": 0.30,
     "reference_height_in": 0.38,
@@ -118,6 +134,12 @@ DEFAULT_STYLES = {
     "secondary_alignment_alpha": 0.50,
     "mapq_alpha_floor": 0.15,
     "coverage_alpha": 0.85,
+    "modification_track_alpha": 0.88,
+    "modification_stem_alpha": 0.34,
+    "modification_marker_size": 13.0,
+    "modification_read_marker_size": 9.0,
+    "modification_letter_min_px": 8.0,
+    "modification_letter_size": 4.0,
     "coverage_bins_per_pixel": 1.00,
     "reference_base_alpha": 0.20,
     "softclip_base_letter_min_px": 8.0,
@@ -130,6 +152,11 @@ DEFAULT_STYLES = {
     "peak_fill_alpha": 0.55,
     "signal_fill_alpha": 0.82,
     "density_fill_alpha": 0.45,
+    "tad_fill_alpha": 0.13,
+    "tad_boundary_alpha": 0.72,
+    "hic_loop_alpha": 0.72,
+    "hic_anchor_alpha": 0.90,
+    "hic_contact_map_alpha": 0.96,
     "haplotype_lane_alpha": 0.055,
     "tag_lane_alpha": 0.055,
     "alignment_edge_width": 0.00,
@@ -155,6 +182,11 @@ DEFAULT_STYLES = {
     "gene_arrow_spacing_px": 32.0,
     "peak_summit_width": 0.85,
     "signal_line_width": 0.75,
+    "tad_line_width": 1.00,
+    "hic_loop_min_width": 0.65,
+    "hic_loop_max_width": 3.20,
+    "hic_contact_gamma": 0.68,
+    "hic_contact_cell_edge_width": 0.12,
     "signal_y_max": 0.0,
     "center_guide_alpha": 0.65,
     "center_guide_width": 0.80,
@@ -181,6 +213,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "visual_colors": DEFAULT_VISUAL_COLORS,
     "haplotype_colors": DEFAULT_HAPLOTYPE_COLORS,
     "tag_colors": DEFAULT_TAG_COLORS,
+    "long_read_colors": DEFAULT_LONG_READ_COLORS,
+    "modification_colors": DEFAULT_MODIFICATION_COLORS,
     "cytoband_colors": DEFAULT_CYTOBAND_COLORS,
     "chromosome_colors": DEFAULT_CHROMOSOME_COLORS,
     "chromosome_palette": DEFAULT_CHROMOSOME_PALETTE,
@@ -191,17 +225,21 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 CONFIG_SECTIONS = set(DEFAULT_CONFIG)
 COLOR_SECTIONS = (
     "alignment_colors", "base_colors", "track_colors", "visual_colors",
-    "haplotype_colors", "tag_colors", "cytoband_colors", "chromosome_colors",
+    "haplotype_colors", "tag_colors", "long_read_colors", "modification_colors",
+    "cytoband_colors", "chromosome_colors",
 )
 ALPHA_STYLE_KEYS = {
     "alignment_alpha", "secondary_alignment_alpha", "mapq_alpha_floor",
     "coverage_alpha", "reference_base_alpha", "cnv_fill_alpha", "baf_alpha",
     "peak_fill_alpha", "signal_fill_alpha", "density_fill_alpha",
+    "tad_fill_alpha", "tad_boundary_alpha", "hic_loop_alpha", "hic_anchor_alpha",
+    "hic_contact_map_alpha",
     "haplotype_lane_alpha", "tag_lane_alpha",
     "center_guide_alpha",
     "breakpoint_link_alpha",
     "grid_line_alpha", "minor_grid_line_alpha", "grid_band_alpha",
     "sashimi_arc_alpha",
+    "modification_track_alpha", "modification_stem_alpha",
 }
 STRING_STYLE_CHOICES = {
     "center_guide_line_style": ("-", "--", ":", "-."),
@@ -211,7 +249,7 @@ STRING_STYLE_CHOICES = {
 }
 NONNEGATIVE_STYLE_KEYS = {
     "alignment_edge_width", "squish_alignment_edge_width",
-    "annotation_edge_width", "signal_y_max",
+    "annotation_edge_width", "signal_y_max", "hic_contact_cell_edge_width",
 }
 
 
@@ -253,7 +291,10 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
         if not isinstance(configured, dict):
             raise ValueError(f"'{section}' must be a YAML mapping.")
         unknown = (
-            [] if section in ("haplotype_colors", "tag_colors", "chromosome_colors")
+            [] if section in (
+                "haplotype_colors", "tag_colors", "modification_colors",
+                "chromosome_colors",
+            )
             else sorted(set(configured) - set(config[section]))
         )
         if unknown:

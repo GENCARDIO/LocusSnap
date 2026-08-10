@@ -297,6 +297,65 @@ python3 -m locus_snap \
   --dpi 140
 
 python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_long_reads.bam \
+  --sample_label 'ONT-style long reads · 5mC and 6mA MM/ML calls' \
+  --fasta out/demo_data/reference/demo_long_reference.fa \
+  --region chrLong:4001-5200 \
+  --long_read_mode \
+  --display_mode expand \
+  --layout pack \
+  --sort_by start \
+  --sort_order asc \
+  --min_mod_probability 0.65 \
+  --max_alignment_depth 0 \
+  --no_coverage \
+  --no_ideogram \
+  --refseq none \
+  --output_dir out \
+  --output_name 37_long_read_modifications \
+  --fig_width 14 \
+  --dpi 150
+
+python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_tumour.bam \
+  --sample_label 'Core coverage and alignments with an external GC-content plugin' \
+  --fasta out/demo_data/reference/demo_reference.fa \
+  --region chrDemo:1-400 \
+  --plugin_track examples.gc_content_plugin:GCContentPlugin \
+    fasta=out/demo_data/reference/demo_reference.fa \
+    window=20 \
+    fill_alpha=0.24 \
+    'track_label=GC content · plugin API v1' \
+    track_height=0.95 \
+    'track_color=#188977' \
+  --display_mode squish \
+  --layout pack \
+  --max_alignment_depth 40 \
+  --no_ideogram \
+  --refseq none \
+  --output_dir out \
+  --output_name 38_custom_track_plugin \
+  --fig_width 14 \
+  --dpi 150
+
+python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_tumour.bam \
+  --sample_label 'Hi-C domains and contacts with aligned sequencing context' \
+  --region chrDemo:1-400 \
+  --custom_track 'out/demo_data/annotations/demo_hic_contacts.bedpe,bedpe,Contact map,#b2182b,triangle,1.55' \
+  --custom_track 'out/demo_data/annotations/demo_hic_domains.tad,tad,Called TADs,#a50f15,collapse,0.95' \
+  --custom_track 'out/demo_data/annotations/demo_hic_loops.bedpe,bedpe,Hi-C loops,#b2182b,arcs,1.05' \
+  --display_mode squish \
+  --layout pack \
+  --max_alignment_depth 35 \
+  --no_ideogram \
+  --refseq none \
+  --output_dir out \
+  --output_name 39_hic_tads_loops \
+  --fig_width 14 \
+  --dpi 150
+
+python3 -m locus_snap \
   --bam out/demo_data/alignments/demo_tumour.bam \
   --bam out/demo_data/alignments/demo_normal.bam \
   --bam out/demo_data/alignments/demo_relapse.bam \

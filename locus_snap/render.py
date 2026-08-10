@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.colors import is_color_like
+from matplotlib.colors import is_color_like, to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import ConnectionPatch, Patch, PathPatch, Polygon, Rectangle
 from matplotlib.path import Path
@@ -24,21 +24,29 @@ from matplotlib.ticker import MaxNLocator
 from locus_snap.annotations import (
     BAF_TRACK_FORMATS,
     CNV_TRACK_FORMATS,
+    HIC_LOOP_TRACK_FORMATS,
+    HIC_TRACK_FORMATS,
     PEAK_TRACK_FORMATS,
     SIGNAL_TRACK_FORMATS,
+    TAD_TRACK_FORMATS,
+    AnnotationItem,
     LoadedAnnotationTrack,
 )
 from locus_snap.config import (
     DEFAULT_CHROMOSOME_COLORS,
     DEFAULT_CHROMOSOME_PALETTE,
     DEFAULT_HAPLOTYPE_COLORS,
+    DEFAULT_MODIFICATION_COLORS,
     DEFAULT_TAG_COLORS,
     DEFAULT_VISUAL_COLORS,
     load_config,
 )
 from locus_snap.cytobands import Cytoband
-from locus_snap.read_model import AlignedRead
+from locus_snap.read_model import AlignedRead, BaseModification
 from locus_snap.reference import ReferenceWindow
+from locus_snap.track_plugin import (
+    LoadedPluginTrack, TrackCanvas, TrackPluginError,
+)
 
 DEFAULT_COVERAGE_VAF_THRESHOLD = 0.20
 DEFAULT_MAX_REFERENCE_SPAN = 250
@@ -68,6 +76,16 @@ class SnvEvidence:
     reverse: int = 0
     base_quality_sum: int = 0
     mapq_sum: int = 0
+
+
+@dataclass
+class ModificationEvidence:
+    modified: int = 0
+    canonical_depth: int = 0
+
+    @property
+    def fraction(self) -> float:
+        return self.modified / self.canonical_depth if self.canonical_depth else 0.0
 
 
 @dataclass(frozen=True)
@@ -184,6 +202,88 @@ def tag_color(
     palette: Optional[List[str]] = None,
 ) -> str:
     return categorical_color(value, colors or DEFAULT_TAG_COLORS, palette)
+
+
+def modification_color(
+    label: str, colors: Optional[Dict[str, str]] = None,
+    palette: Optional[List[str]] = None,
+) -> str:
+    selected = colors or DEFAULT_MODIFICATION_COLORS
+    if label in selected:
+        return selected[label]
+    if "other" in selected and len(selected) == 1:
+        return selected["other"]
+    return categorical_color(label, selected, palette)
+
+
+def modification_matches(modification: BaseModification, codes: List[str]) -> bool:
+    if not codes:
+        return True
+    accepted = {str(value).lower() for value in codes}
+    aliases = {
+        str(modification.code).lower(),
+        modification.label.lower(),
+        f"{modification.canonical_base}+{modification.code}".lower(),
+    }
+    return bool(accepted & aliases)
+
+
+def has_base_modifications(
+    reads: List[AlignedRead], start: int, end: int, codes: List[str],
+) -> bool:
+    return any(
+        start <= modification.ref_position < end
+        and modification_matches(modification, codes)
+        for read in reads
+        for modification in read.base_modifications
+    )
+
+
+def compute_modification_evidence(
+    reads: List[AlignedRead], start: int, end: int,
+    minimum_probability: float = 0.5, codes: Optional[List[str]] = None,
+) -> Dict[str, Dict[int, ModificationEvidence]]:
+    """Estimate modified/canonical depth from MM/ML calls.
+
+    Calls at or above ``minimum_probability`` contribute to modified depth;
+    every read carrying the canonical base at that genomic position contributes
+    to the denominator. The result is intentionally sparse and contains only
+    positions represented by at least one MM/ML call.
+    """
+    selected_codes = list(codes or [])
+    evidence: Dict[str, Dict[int, ModificationEvidence]] = {}
+    canonical_by_site: Dict[Tuple[str, int], set] = {}
+    seen_calls = set()
+    for read_index, read in enumerate(reads):
+        for modification in read.base_modifications:
+            if not start <= modification.ref_position < end:
+                continue
+            if not modification_matches(modification, selected_codes):
+                continue
+            label = modification.label
+            position = modification.ref_position
+            canonical_by_site.setdefault((label, position), set()).add(
+                modification.aligned_base
+            )
+            item = evidence.setdefault(label, {}).setdefault(
+                position, ModificationEvidence()
+            )
+            call_key = (read_index, label, position)
+            if call_key in seen_calls:
+                continue
+            seen_calls.add(call_key)
+            if (
+                modification.probability is not None
+                and modification.probability >= minimum_probability
+            ):
+                item.modified += 1
+
+    for (label, position), canonical_bases in canonical_by_site.items():
+        item = evidence[label][position]
+        item.canonical_depth = sum(
+            1 for read in reads if read.base_at(position) in canonical_bases
+        )
+    return evidence
 
 
 def compute_coverage(reads: List[AlignedRead], start: int, end: int) -> List[int]:
@@ -430,15 +530,26 @@ def apply_genomic_axis(
 
 
 def left_margin_fraction(
-    fig_width: float, genomic_tracks: List[LoadedAnnotationTrack]
+    fig_width: float, genomic_tracks: List[Any]
 ) -> float:
     """Reserve enough physical space for annotation labels outside the axes."""
     longest_label = 0
     for track in genomic_tracks:
+        if isinstance(track, LoadedPluginTrack):
+            # Plugin titles sit inside their axes so their optional numeric
+            # y ticks retain the outside margin without collisions.
+            continue
         if len(track.label) > longest_label:
             longest_label = len(track.label)
     margin_in = max(0.70, 0.25 + longest_label * 0.065)
     return min(margin_in / fig_width, 0.22)
+
+
+def annotation_row_count(track: Any) -> int:
+    """Return a layout row count for built-in or plugin-backed tracks."""
+    if isinstance(track, LoadedPluginTrack):
+        return 1
+    return max(len(track.rows), 1)
 
 
 def ellipsize(text: str, max_chars: int) -> str:
@@ -492,9 +603,14 @@ class AlignmentRenderer:
         highlight_color: str = "#ffd54f",
         highlight_alpha: float = 0.20,
         title_align: str = "left",
+        long_read_mode: bool = False,
+        show_base_modifications: bool = False,
+        modification_codes: Optional[List[str]] = None,
+        min_mod_probability: float = 0.5,
     ):
         theme = visual_config or load_config()
         self.base_colors = dict(theme["base_colors"])
+        self.track_colors = dict(theme["track_colors"])
         self.visual_colors = dict(theme["visual_colors"])
         self.haplotype_colors = dict(theme["haplotype_colors"])
         self.tag_colors = dict(theme["tag_colors"])
@@ -505,6 +621,8 @@ class AlignmentRenderer:
         self.cytoband_colors = dict(theme["cytoband_colors"])
         self.chromosome_colors = dict(theme["chromosome_colors"])
         self.chromosome_palette = list(theme["chromosome_palette"])
+        self.long_read_colors = dict(theme["long_read_colors"])
+        self.modification_colors = dict(theme["modification_colors"])
         self.styles = dict(theme["styles"])
         self.sort_base_position = sort_base_position
         self.sort_reference_base = sort_reference_base
@@ -547,10 +665,17 @@ class AlignmentRenderer:
                 f"Choose {', '.join(TITLE_ALIGNMENTS)}."
             )
         self.title_align = title_align
+        self.long_read_mode = long_read_mode
+        self.show_base_modifications = show_base_modifications
+        self.modification_codes = list(modification_codes or [])
+        if not 0 <= min_mod_probability <= 1:
+            raise ValueError("Minimum modification probability must be between 0 and 1.")
+        self.min_mod_probability = float(min_mod_probability)
+        self.modification_labels_seen: set = set()
         self.show_coverage = show_coverage
         self.annotate_gap = annotate_gap
         self.max_mismatch_render_span = max_mismatch_render_span
-        self.pair_colors = pair_colors
+        self.pair_colors = pair_colors and not long_read_mode
         self.shade_by_mapq = shade_by_mapq
         self.mapq_cap = mapq_cap
         self.alignment_colors = dict(theme["alignment_colors"])
@@ -585,6 +710,9 @@ class AlignmentRenderer:
         self.haplotype_view = haplotype_view
         self.read_tag = read_tag
         self.tag_view = tag_view
+        self.long_read_coloring = (
+            long_read_mode and haplotype_view == "none" and tag_view == "none"
+        )
         self.tag_label = tag_label or (f"Tag {read_tag}" if read_tag else "Tag")
         self.tag_value_colors: Dict[str, str] = {}
         self.tag_value_counts: Dict[str, int] = {}
@@ -597,9 +725,13 @@ class AlignmentRenderer:
             self.styles["squish_row_margin"] if display_mode == "squish"
             else self.styles["row_margin"]
         )
-        if haplotype_view != "none" or tag_view != "none":
+        if self.long_read_coloring and show_base_modifications:
+            legend_group_count = 5
+        elif self.long_read_coloring or show_base_modifications:
             legend_group_count = 4
-        elif pair_colors:
+        elif haplotype_view != "none" or tag_view != "none":
+            legend_group_count = 4
+        elif self.pair_colors:
             legend_group_count = 4
         else:
             legend_group_count = 3
@@ -717,8 +849,10 @@ class AlignmentRenderer:
         return 0.01, "left"
 
     def annotation_track_height(
-        self, annotation: LoadedAnnotationTrack, row_count: Optional[int] = None,
+        self, annotation: Any, row_count: Optional[int] = None,
     ) -> float:
+        if isinstance(annotation, LoadedPluginTrack):
+            return annotation.height_in
         """Resolve a custom override or the YAML default for an annotation track."""
         if annotation.height_in is not None:
             return annotation.height_in
@@ -732,6 +866,8 @@ class AlignmentRenderer:
             return self.styles["cnv_track_height_in"]
         if annotation.kind in BAF_TRACK_FORMATS:
             return self.styles["baf_track_height_in"]
+        if annotation.kind in HIC_TRACK_FORMATS:
+            return self.styles["hic_track_height_in"]
         rows = row_count if row_count is not None else max(len(annotation.rows), 1)
         return max(rows, 1) * self.styles["annotation_row_height_in"]
 
@@ -753,6 +889,13 @@ class AlignmentRenderer:
             )
             self.tag_value_colors[label] = color
             self.tag_value_counts[label] = self.tag_value_counts.get(label, 0) + 1
+        elif self.long_read_coloring:
+            if read.is_supplementary:
+                color = self.long_read_colors["supplementary"]
+            elif read.is_reverse:
+                color = self.long_read_colors["reverse"]
+            else:
+                color = self.long_read_colors["forward"]
         elif self.pair_colors and read.pair_category == "interchrom":
             color = self.alignment_colors["interchrom"] or chrom_color(
                 read.mate_chrom, self.chromosome_palette,
@@ -809,6 +952,15 @@ class AlignmentRenderer:
             self.max_reference_span > 0 and span <= self.max_reference_span
         )
         render_base_detail = span <= self.max_mismatch_render_span
+        data_reads = all_reads_for_coverage
+        if data_reads is None:
+            data_reads = [read for row in rows for read in row]
+        show_modification_track = bool(
+            self.show_base_modifications
+            and has_base_modifications(
+                data_reads, window_start, window_end, self.modification_codes
+            )
+        )
 
         tracks = []
         ratios = []
@@ -825,6 +977,9 @@ class AlignmentRenderer:
         if self.show_coverage:
             tracks.append("coverage")
             ratios.append(self.styles["coverage_track_height_in"])
+        if show_modification_track:
+            tracks.append("modifications")
+            ratios.append(self.styles["modification_track_height_in"])
         if self.show_sashimi:
             tracks.append("sashimi")
             ratios.append(self.styles["sashimi_track_height_in"])
@@ -906,12 +1061,12 @@ class AlignmentRenderer:
         # --- coverage --------------------------------------------------
         if self.show_coverage:
             cov_ax = ax_by_track["coverage"]
-            cov_reads = all_reads_for_coverage
-            if cov_reads is None:
-                cov_reads = []
-                for row in rows:
-                    cov_reads.extend(row)
-            self.draw_coverage_track(cov_ax, cov_reads, window_start, window_end)
+            self.draw_coverage_track(cov_ax, data_reads, window_start, window_end)
+
+        if show_modification_track:
+            self.draw_modification_track(
+                ax_by_track["modifications"], data_reads, window_start, window_end
+            )
 
         if self.show_sashimi:
             sashimi_reads = all_reads_for_coverage
@@ -1127,6 +1282,55 @@ class AlignmentRenderer:
                     },
                 )
         return max(max_depth, 1)
+
+    def draw_modification_track(
+        self, ax, reads: List[AlignedRead], start: int, end: int,
+    ) -> None:
+        """Draw per-site modified/canonical fractions decoded from MM/ML tags."""
+        evidence = compute_modification_evidence(
+            reads, start, end,
+            minimum_probability=self.min_mod_probability,
+            codes=self.modification_codes,
+        )
+        ax.set_ylim(0, 1.05)
+        ax.axhline(0, color=self.visual_colors["axis"], linewidth=0.55, zorder=1)
+        for label in sorted(evidence):
+            sites = evidence[label]
+            positions = sorted(
+                position for position, item in sites.items() if item.canonical_depth
+            )
+            if not positions:
+                continue
+            fractions = [sites[position].fraction for position in positions]
+            color = modification_color(
+                label, self.modification_colors, self.chromosome_palette
+            )
+            self.modification_labels_seen.add(label)
+            centers = [position + 0.5 for position in positions]
+            ax.vlines(
+                centers, 0, fractions, color=color, linewidth=0.7,
+                alpha=self.styles["modification_stem_alpha"], zorder=2,
+            )
+            ax.scatter(
+                centers, fractions, s=self.styles["modification_marker_size"],
+                marker="o", facecolors=color,
+                edgecolors=self.visual_colors["contrast_edge"], linewidths=0.25,
+                alpha=self.styles["modification_track_alpha"], zorder=3,
+            )
+        ax.set_yticks([0, 0.5, 1.0])
+        ax.set_yticklabels(["0", ".5", "1"], fontsize=6)
+        ax.tick_params(
+            left=True, labelleft=True, labelsize=6,
+            colors=self.visual_colors["axis"], length=2,
+        )
+        ax.spines["left"].set_visible(True)
+        ax.spines["left"].set_color(self.visual_colors["axis"])
+        ax.text(
+            0.005, 0.97, "MM/ML modified fraction",
+            transform=ax.transAxes, ha="left", va="top",
+            fontsize=6.5, color=self.visual_colors["secondary_text"],
+            clip_on=True,
+        )
 
     def draw_center_guide(self, ax, start: int, end: int) -> None:
         """Draw the optional IGV-like guide at the exact window midpoint."""
@@ -1363,12 +1567,18 @@ class AlignmentRenderer:
     def draw_annotation_track(
         self,
         ax,
-        track: LoadedAnnotationTrack,
+        track: Any,
         window_start: int,
         window_end: int,
         shared_row_count: Optional[int] = None,
     ) -> None:
         """Draw a UCSC-like BED or transcript annotation track."""
+        if isinstance(track, LoadedPluginTrack):
+            self.draw_plugin_track(ax, track, window_start, window_end)
+            return
+        if track.kind in HIC_TRACK_FORMATS:
+            self.draw_hic_track(ax, track, window_start, window_end)
+            return
         if track.display_mode == "density":
             self.draw_density_track(ax, track, window_start, window_end)
             return
@@ -1509,6 +1719,255 @@ class AlignmentRenderer:
                         line_start, row_index + 0.05, display_name, ha="left", va="top",
                         fontsize=5.5, color=track.color, clip_on=True, zorder=5,
                     )
+
+    def draw_hic_track(
+        self, ax, track: LoadedAnnotationTrack, window_start: int, window_end: int
+    ) -> None:
+        """Draw called TAD domains or BEDPE Hi-C contacts in genomic space."""
+        ax.set_ylim(0, 1.05)
+        ax.set_yticks([])
+        ax.text(
+            -0.012, 0.5, ellipsize(track.label, 28),
+            transform=ax.transAxes, ha="right", va="center",
+            fontsize=7, color=track.color, fontweight="bold", clip_on=False,
+        )
+        if not track.items:
+            ax.text(
+                0.01, 0.5, "No domains" if track.kind in TAD_TRACK_FORMATS else "No contacts",
+                transform=ax.transAxes, ha="left", va="center",
+                fontsize=6.5, color=self.visual_colors["axis"],
+            )
+            return
+
+        scored = [item.value for item in track.items if item.value is not None]
+        score_min = min(scored) if scored else 0.0
+        score_max = max(scored) if scored else 1.0
+
+        def score_fraction(item: AnnotationItem) -> float:
+            if item.value is None or score_max <= score_min:
+                return 1.0
+            return max(0.0, min(1.0, (item.value - score_min) / (score_max - score_min)))
+
+        if (
+            track.kind in HIC_LOOP_TRACK_FORMATS
+            and track.display_mode == "triangle"
+        ):
+            self.draw_hic_contact_map(
+                ax, track, window_start, window_end, score_fraction
+            )
+            return
+
+        if track.kind in TAD_TRACK_FORMATS:
+            for item in sorted(track.items, key=lambda value: (value.start, value.end)):
+                left = max(item.start, window_start)
+                right = min(item.end, window_end)
+                if right <= left:
+                    continue
+                midpoint = (item.start + item.end) / 2
+                visible_midpoint = max(left, min(right, midpoint))
+                height = 0.68 + 0.24 * score_fraction(item)
+                triangle = Polygon(
+                    [(left, 0.08), (visible_midpoint, height), (right, 0.08)],
+                    closed=True, facecolor=track.color,
+                    edgecolor=track.color,
+                    linewidth=self.styles["tad_line_width"],
+                    alpha=self.styles["tad_fill_alpha"], zorder=2,
+                )
+                ax.add_patch(triangle)
+                for boundary in (item.start, item.end):
+                    if window_start <= boundary <= window_end:
+                        ax.plot(
+                            [boundary, boundary], [0.04, height], color=track.color,
+                            linewidth=self.styles["tad_line_width"],
+                            alpha=self.styles["tad_boundary_alpha"], zorder=3,
+                        )
+                if item.name and right - left >= (window_end - window_start) * 0.04:
+                    ax.text(
+                        (left + right) / 2, min(height + 0.025, 1.0),
+                        ellipsize(item.name, 28),
+                        ha="center", va="bottom", fontsize=5.5,
+                        color=track.color, clip_on=True, zorder=4,
+                    )
+            ax.text(
+                0.005, 0.98, "TAD domains · boundary guides",
+                transform=ax.transAxes, ha="left", va="top", fontsize=5.5,
+                color=self.visual_colors["secondary_text"],
+            )
+            return
+
+        window_span = max(window_end - window_start, 1)
+        for item in track.items:
+            if item.start2 is None or item.end2 is None:
+                continue
+            center1 = (item.start + item.end) / 2
+            center2 = (item.start2 + item.end2) / 2
+            line_width = self.styles["hic_loop_min_width"] + score_fraction(item) * (
+                self.styles["hic_loop_max_width"] - self.styles["hic_loop_min_width"]
+            )
+            if item.group == item.chrom2:
+                left_center, right_center = sorted((center1, center2))
+                visible_left = max(window_start, left_center)
+                visible_right = min(window_end, right_center)
+                if visible_right <= visible_left:
+                    continue
+                distance_fraction = min(1.0, abs(center2 - center1) / window_span)
+                arc_height = 0.16 + 0.76 * sqrt(distance_fraction)
+                path = Path(
+                    [(visible_left, 0.10),
+                     ((visible_left + visible_right) / 2, arc_height),
+                     (visible_right, 0.10)],
+                    [Path.MOVETO, Path.CURVE3, Path.CURVE3],
+                )
+                ax.add_patch(PathPatch(
+                    path, fill=False, edgecolor=track.color,
+                    linewidth=line_width, alpha=self.styles["hic_loop_alpha"],
+                    capstyle="round", zorder=2,
+                ))
+                for anchor_start, anchor_end in (
+                    (item.start, item.end), (item.start2, item.end2)
+                ):
+                    left = max(anchor_start, window_start)
+                    right = min(anchor_end, window_end)
+                    if right > left:
+                        ax.add_patch(Rectangle(
+                            (left, 0.055), right - left, 0.09,
+                            facecolor=track.color, edgecolor="none",
+                            alpha=self.styles["hic_anchor_alpha"], zorder=3,
+                        ))
+                if item.name and visible_right - visible_left >= window_span * 0.04:
+                    ax.text(
+                        (visible_left + visible_right) / 2, min(arc_height + 0.035, 1.0),
+                        ellipsize(item.name, 24), ha="center", va="bottom",
+                        fontsize=5.2, color=track.color, clip_on=True,
+                    )
+                continue
+
+            visible_anchors = []
+            if (
+                item.group == track.chrom
+                and item.end > window_start and item.start < window_end
+            ):
+                visible_anchors.append((item.start, item.end, item.chrom2))
+            if (
+                item.chrom2 == track.chrom
+                and item.end2 > window_start and item.start2 < window_end
+            ):
+                visible_anchors.append((item.start2, item.end2, item.group))
+            for anchor_start, anchor_end, partner_chrom in visible_anchors:
+                left = max(anchor_start, window_start)
+                right = min(anchor_end, window_end)
+                center = (left + right) / 2
+                ax.add_patch(Rectangle(
+                    (left, 0.055), right - left, 0.09,
+                    facecolor=track.color, edgecolor="none",
+                    alpha=self.styles["hic_anchor_alpha"], zorder=3,
+                ))
+                ax.plot(
+                    center, 0.22, marker="^", markersize=4.2,
+                    color=track.color, markeredgewidth=0, zorder=3,
+                )
+                ax.text(
+                    center, 0.28, f"to {partner_chrom}", ha="center", va="bottom",
+                    fontsize=5.2, color=track.color, clip_on=True,
+                )
+        ax.text(
+            0.005, 0.98, "Hi-C contacts · BEDPE anchors",
+            transform=ax.transAxes, ha="left", va="top", fontsize=5.5,
+            color=self.visual_colors["secondary_text"],
+        )
+
+    def draw_hic_contact_map(
+        self, ax, track: LoadedAnnotationTrack,
+        window_start: int, window_end: int, score_fraction,
+    ) -> None:
+        """Render scored cis BEDPE bins as a rotated triangular contact map."""
+        cis_items = [
+            item for item in track.items
+            if item.group == item.chrom2 == track.chrom
+            and item.start2 is not None and item.end2 is not None
+        ]
+        if not cis_items:
+            ax.text(
+                0.01, 0.5, "No cis contacts", transform=ax.transAxes,
+                ha="left", va="center", fontsize=6.5,
+                color=self.visual_colors["axis"],
+            )
+            return
+
+        low_rgb = to_rgb(self.track_colors["hic_contact_low"])
+        high_rgb = to_rgb(track.color)
+        gamma = self.styles["hic_contact_gamma"]
+        window_span = max(window_end - window_start, 1)
+
+        def contact_color(item: AnnotationItem):
+            intensity = score_fraction(item) ** gamma
+            return tuple(
+                low + (high - low) * intensity
+                for low, high in zip(low_rgb, high_rgb)
+            )
+
+        for item in sorted(cis_items, key=score_fraction):
+            anchor1 = (item.start, item.end)
+            anchor2 = (item.start2, item.end2)
+            if sum(anchor1) > sum(anchor2):
+                anchor1, anchor2 = anchor2, anchor1
+            start1, end1 = anchor1
+            start2, end2 = anchor2
+            matrix_corners = (
+                (start1, start2), (end1, start2),
+                (end1, end2), (start1, end2),
+            )
+            polygon_points = [
+                (
+                    (position1 + position2) / 2,
+                    0.05 + 0.90 * abs(position2 - position1) / window_span,
+                )
+                for position1, position2 in matrix_corners
+            ]
+            projected_x = [point[0] for point in polygon_points]
+            if max(projected_x) < window_start or min(projected_x) > window_end:
+                continue
+            color = contact_color(item)
+            ax.add_patch(Polygon(
+                polygon_points, closed=True, facecolor=color, edgecolor=color,
+                linewidth=self.styles["hic_contact_cell_edge_width"],
+                alpha=self.styles["hic_contact_map_alpha"], zorder=2,
+            ))
+
+        ax.plot(
+            [window_start, window_end], [0.05, 0.05],
+            color=track.color, linewidth=0.45, alpha=0.45, zorder=3,
+        )
+        ax.text(
+            0.005, 0.98, "Triangular Hi-C contact map · score intensity",
+            transform=ax.transAxes, ha="left", va="top", fontsize=5.5,
+            color=self.visual_colors["secondary_text"],
+        )
+
+    def draw_plugin_track(
+        self, ax, track: LoadedPluginTrack,
+        window_start: int, window_end: int,
+    ) -> None:
+        """Render an external track through the public versioned canvas API."""
+        ax.set_ylim(0, 1)
+        ax.text(
+            0.005, 0.97, ellipsize(track.label, max(18, int(self.fig_width * 12))),
+            transform=ax.transAxes, ha="left", va="top",
+            fontsize=7, color=track.color, fontweight="bold", clip_on=True,
+        )
+        canvas = TrackCanvas(
+            ax, track.region, track.color,
+            colors=self.visual_colors,
+        )
+        try:
+            track.plugin.render(
+                canvas, track.payload, track.region, track.options
+            )
+        except Exception as exc:
+            raise TrackPluginError(
+                f"Track plugin '{track.plugin.name}' failed while rendering "
+                f"{track.region.chrom}:{window_start + 1}-{window_end}: {exc}"
+            ) from exc
 
     def draw_peak_track(
         self, ax, track: LoadedAnnotationTrack, window_start: int, window_end: int
@@ -1844,9 +2303,16 @@ class AlignmentRenderer:
         plot_right: float = 0.95,
     ) -> list:
         """Draw responsive topic cards below the genomic plot."""
-        alignment_handles = [
-            Patch(facecolor=self.alignment_colors["normal"], edgecolor="none", label="Normal / concordant"),
-        ]
+        if self.long_read_coloring:
+            alignment_handles = [
+                Patch(facecolor=self.long_read_colors["forward"], edgecolor="none", label="Forward"),
+                Patch(facecolor=self.long_read_colors["reverse"], edgecolor="none", label="Reverse"),
+                Patch(facecolor=self.long_read_colors["supplementary"], edgecolor="none", label="Supplementary"),
+            ]
+        else:
+            alignment_handles = [
+                Patch(facecolor=self.alignment_colors["normal"], edgecolor="none", label="Normal / concordant"),
+            ]
         if self.view_as_pairs:
             alignment_handles.append(
                 Line2D([0], [0], color=self.visual_colors["secondary_text"], lw=1.0, label="Mate link")
@@ -1943,6 +2409,15 @@ class AlignmentRenderer:
             base_handles.append(Patch(
                 facecolor=self.base_colors[base], edgecolor="none", label=base
             ))
+        modification_handles = []
+        for label in sorted(self.modification_labels_seen):
+            modification_handles.append(Line2D(
+                [0], [0], marker="o", linestyle="none",
+                markerfacecolor=modification_color(
+                    label, self.modification_colors, self.chromosome_palette
+                ),
+                markeredgecolor="none", label=label,
+            ))
 
         legend_ax = fig.add_axes([
             plot_left, self.legend_bottom_in / fig_height, plot_right - plot_left,
@@ -1966,6 +2441,8 @@ class AlignmentRenderer:
             groups.append((self.tag_label, tag_handles, tag_columns, tag_weight))
         elif insert_size_handles:
             groups.append(("Insert size", insert_size_handles, 1, 1.05))
+        if modification_handles:
+            groups.append(("Base modifications", modification_handles, 1, 1.10))
         groups.append(("Base identity", base_handles, 2, 1.00))
 
         positioned_groups = []
@@ -2098,6 +2575,7 @@ class AlignmentRenderer:
             n_rows = max(len(panel["rows"]), 1)
             header_name = f"panel_header_{i}"
             cov_name = f"coverage_{i}"
+            mod_name = f"modifications_{i}"
             sashimi_name = f"sashimi_{i}"
             aln_name = f"alignments_{i}"
             tracks.append(header_name)
@@ -2109,11 +2587,22 @@ class AlignmentRenderer:
                 tracks.append(companion_name)
                 ratios.append(self.annotation_track_height(annotation))
             panel_track_names.append(
-                (header_name, cov_name, sashimi_name, aln_name, companion_names)
+                (header_name, cov_name, mod_name, sashimi_name, aln_name, companion_names)
             )
             if self.show_coverage:
                 tracks.append(cov_name)
                 ratios.append(self.styles["coverage_track_height_in"])
+            panel_reads = panel.get("all_reads_for_coverage")
+            if panel_reads is None:
+                panel_reads = [read for row in panel["rows"] for read in row]
+            if (
+                self.show_base_modifications
+                and has_base_modifications(
+                    panel_reads, window_start, window_end, self.modification_codes
+                )
+            ):
+                tracks.append(mod_name)
+                ratios.append(self.styles["modification_track_height_in"])
             if self.show_sashimi:
                 tracks.append(sashimi_name)
                 ratios.append(self.styles["sashimi_track_height_in"])
@@ -2183,7 +2672,7 @@ class AlignmentRenderer:
             rows = panel["rows"]
             layout = panel.get("layout", "pack")
             n_rows = max(len(rows), 1)
-            header_name, cov_name, sashimi_name, aln_name, companion_names = panel_track_names[i]
+            header_name, cov_name, mod_name, sashimi_name, aln_name, companion_names = panel_track_names[i]
 
             panel_label = panel.get("label", f"bam{i+1}")
             if panel.get("downsampled_reads"):
@@ -2220,6 +2709,15 @@ class AlignmentRenderer:
                 coverage_axes.append(cov_ax)
                 shared_coverage_max = max(shared_coverage_max, panel_coverage_max)
 
+            if mod_name in ax_by_track:
+                modification_reads = panel.get("all_reads_for_coverage")
+                if modification_reads is None:
+                    modification_reads = [read for row in rows for read in row]
+                self.draw_modification_track(
+                    ax_by_track[mod_name], modification_reads,
+                    window_start, window_end,
+                )
+
             if self.show_sashimi:
                 sashimi_reads = panel.get("all_reads_for_coverage")
                 if sashimi_reads is None:
@@ -2253,7 +2751,7 @@ class AlignmentRenderer:
         for track, ax in ax_by_track.items():
             if track != "ideogram" and not track.startswith("panel_header_"):
                 self.draw_center_guide(ax, window_start, window_end)
-        bottom_aln_ax = ax_by_track[panel_track_names[-1][3]]
+        bottom_aln_ax = ax_by_track[panel_track_names[-1][4]]
         apply_genomic_axis(
             bottom_aln_ax, tick_positions, window_start, window_end, label_size=9,
             color=self.visual_colors["primary_text"],
@@ -2314,6 +2812,16 @@ class AlignmentRenderer:
                 show_ref_track = True
                 break
 
+        show_modification_track = self.show_base_modifications and any(
+            has_base_modifications(
+                panel.get("all_reads_for_coverage")
+                if panel.get("all_reads_for_coverage") is not None
+                else [read for row in panel["rows"] for read in row],
+                panel["start"], panel["end"], self.modification_codes,
+            )
+            for panel in panels
+        )
+
         tracks = ["panel_header"]
         ratios = [self.styles["panel_header_height_in"]]
         show_ideogram = False
@@ -2338,7 +2846,9 @@ class AlignmentRenderer:
             shared_rows = 1
             for panel in panels:
                 if index < len(panel.get("genomic_tracks", [])):
-                    row_count = len(panel["genomic_tracks"][index].rows)
+                    row_count = annotation_row_count(
+                        panel["genomic_tracks"][index]
+                    )
                     if row_count > shared_rows:
                         shared_rows = row_count
             annotation_row_counts.append(shared_rows)
@@ -2355,6 +2865,9 @@ class AlignmentRenderer:
         if self.show_coverage:
             tracks.append("coverage")
             ratios.append(self.styles["coverage_track_height_in"])
+        if show_modification_track:
+            tracks.append("modifications")
+            ratios.append(self.styles["modification_track_height_in"])
         if self.show_sashimi:
             tracks.append("sashimi")
             ratios.append(self.styles["sashimi_track_height_in"])
@@ -2475,6 +2988,14 @@ class AlignmentRenderer:
                         cov_reads.extend(row)
                 self.draw_coverage_track(cov_ax, cov_reads, start, end)
 
+            if show_modification_track:
+                modification_reads = panel.get("all_reads_for_coverage")
+                if modification_reads is None:
+                    modification_reads = [read for row in rows for read in row]
+                self.draw_modification_track(
+                    axes_by_track["modifications"], modification_reads, start, end
+                )
+
             if self.show_sashimi:
                 sashimi_reads = panel.get("all_reads_for_coverage")
                 if sashimi_reads is None:
@@ -2587,7 +3108,9 @@ class AlignmentRenderer:
         for annotation_index in range(annotation_count):
             shared_rows = max(
                 (
-                    len(locus["genomic_tracks"][annotation_index].rows)
+                    annotation_row_count(
+                        locus["genomic_tracks"][annotation_index]
+                    )
                     for locus in loci
                     if annotation_index < len(locus.get("genomic_tracks", []))
                 ),
@@ -2639,11 +3162,28 @@ class AlignmentRenderer:
                 ))
 
             coverage_name = f"coverage_{sample_index}"
+            modification_name = f"modifications_{sample_index}"
             sashimi_name = f"sashimi_{sample_index}"
             alignment_name = f"alignments_{sample_index}"
             if self.show_coverage:
                 tracks.append(coverage_name)
                 ratios.append(self.styles["coverage_track_height_in"])
+            show_sample_modifications = self.show_base_modifications and any(
+                has_base_modifications(
+                    locus["samples"][sample_index].get("all_reads_for_coverage")
+                    if locus["samples"][sample_index].get("all_reads_for_coverage") is not None
+                    else [
+                        read
+                        for row in locus["samples"][sample_index]["rows"]
+                        for read in row
+                    ],
+                    locus["start"], locus["end"], self.modification_codes,
+                )
+                for locus in loci
+            )
+            if show_sample_modifications:
+                tracks.append(modification_name)
+                ratios.append(self.styles["modification_track_height_in"])
             if self.show_sashimi:
                 tracks.append(sashimi_name)
                 ratios.append(self.styles["sashimi_track_height_in"])
@@ -2658,6 +3198,7 @@ class AlignmentRenderer:
                 "header": header_name,
                 "companions": companion_names,
                 "coverage": coverage_name,
+                "modifications": modification_name if show_sample_modifications else None,
                 "sashimi": sashimi_name,
                 "alignments": alignment_name,
             })
@@ -2788,6 +3329,14 @@ class AlignmentRenderer:
                         coverage_reads = [read for row in rows for read in row]
                     self.draw_coverage_track(
                         axes_by_track[names["coverage"]], coverage_reads, start, end
+                    )
+                if names["modifications"]:
+                    modification_reads = sample.get("all_reads_for_coverage")
+                    if modification_reads is None:
+                        modification_reads = [read for row in rows for read in row]
+                    self.draw_modification_track(
+                        axes_by_track[names["modifications"]],
+                        modification_reads, start, end,
                     )
                 if self.show_sashimi:
                     sashimi_reads = sample.get("all_reads_for_coverage")
@@ -3132,6 +3681,47 @@ class AlignmentRenderer:
             for rpos, qbase in read.mismatches:
                 ax.add_patch(Rectangle((rpos, y0), 1, h, facecolor=self.base_colors.get(qbase, self.base_colors["N"]),
                                         edgecolor="none", zorder=7))
+
+        if (
+            self.show_base_modifications
+            and pixels_per_base >= 0.75
+        ):
+            for modification in read.base_modifications:
+                if not modification_matches(modification, self.modification_codes):
+                    continue
+                probability = modification.probability
+                if probability is None or probability < self.min_mod_probability:
+                    continue
+                label = modification.label
+                color = modification_color(
+                    label, self.modification_colors, self.chromosome_palette
+                )
+                self.modification_labels_seen.add(label)
+                x = modification.ref_position + 0.5
+                ax.scatter(
+                    [x], [y0 + h / 2],
+                    s=(
+                        self.styles["modification_read_marker_size"]
+                        * (0.45 if squished else 1.0)
+                    ), marker="o",
+                    facecolors=color, edgecolors=self.visual_colors["contrast_edge"],
+                    linewidths=0.25, alpha=max(0.45, probability), zorder=9,
+                    clip_on=True,
+                )
+                if (
+                    not squished
+                    and pixels_per_base >= self.styles["modification_letter_min_px"]
+                ):
+                    letter = str(modification.code)
+                    if len(letter) > 2:
+                        letter = "•"
+                    ax.text(
+                        x, y0 + h / 2, letter,
+                        ha="center", va="center",
+                        fontsize=self.styles["modification_letter_size"],
+                        color=self.visual_colors["contrast_edge"],
+                        fontweight="bold", clip_on=True, zorder=10,
+                    )
 
         sort_position = self.active_sort_base_position
         if sort_position is not None:

@@ -59,7 +59,8 @@ that track.
 
 ## Examples
 
-Click any preview for the full-resolution figure.
+Ten representative previews are shown below. Click any preview for the
+full-resolution figure.
 
 <table>
   <tr>
@@ -76,9 +77,9 @@ Click any preview for the full-resolution figure.
   </tr>
   <tr>
     <td width="50%">
-      <a href="out/31_structural_variant_evidence.png"><img src="out/31_structural_variant_evidence.png" alt="Deletion, tandem duplication, inversion, and translocation with multiple classes of sequencing evidence"></a><br>
-      <strong>Structural-variant evidence</strong><br>
-      <sub>Deletion, tandem duplication, inversion, and chr1–chr2 translocation with event-specific coverage, pair orientation, split reads, and soft clips.</sub>
+      <a href="out/34_explicit_multilocus_breakpoint.png"><img src="out/34_explicit_multilocus_breakpoint.png" alt="Explicit chr1 and chr2 breakpoint loci displayed as independently scaled linked columns"></a><br>
+      <strong>Explicit multi-locus breakpoint view</strong><br>
+      <sub>Independently scaled loci align reciprocal pairs, split reads, soft clips, coverage, and VCF breakends.</sub>
     </td>
     <td width="50%">
       <a href="out/16_coverage_snv_vaf.png"><img src="out/16_coverage_snv_vaf.png" alt="Coverage track with SNV variant allele fractions"></a><br>
@@ -88,83 +89,38 @@ Click any preview for the full-resolution figure.
   </tr>
   <tr>
     <td width="50%">
-      <a href="out/19_haplotype_split_view.png"><img src="out/19_haplotype_split_view.png" alt="Reads separated into phased haplotype lanes"></a><br>
-      <strong>Phased haplotype lanes</strong><br>
-      <sub>HP/PS-aware read colouring and lane separation.</sub>
-    </td>
-    <td width="50%">
       <a href="out/18_variant_evidence_baf_loh.png"><img src="out/18_variant_evidence_baf_loh.png" alt="Copy-number segments with B-allele fractions and loss of heterozygosity"></a><br>
       <strong>CNV with BAF/LOH and genomic bands</strong><br>
-      <sub>Alternating coordinate bands align purity-aware CN1 loss (BAF 0.20/0.80), CN3 gain (BAF 0.36/0.64), and their matching depth shifts.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2">
-      <a href="out/36_tag_grouped_reads.png"><img src="out/36_tag_grouped_reads.png" alt="Reads grouped into three labelled and distinctly coloured BAM read-group lanes"></a><br>
-      <strong>Group and colour reads by BAM tag</strong><br>
-      <sub>Three RG libraries are separated into labelled lanes, with deterministic or user-defined colours and ordinary base mismatches retained.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <a href="out/26_chipseq_peaks_density.png"><img src="out/26_chipseq_peaks_density.png" alt="Normalized CTCF ChIP-seq signal profiles"></a><br>
-      <strong>ChIP-seq signal profiles</strong><br>
-      <sub>Track-only normalized signal comparison with gene annotations.</sub>
+      <sub>Depth, copy-number segments, and BAF shifts distinguish loss/LOH from copy-number gain.</sub>
     </td>
     <td width="50%">
-      <a href="out/27_multi_bam_vcf_companions.png"><img src="out/27_multi_bam_vcf_companions.png" alt="Multiple BAM samples with companion VCF tracks"></a><br>
-      <strong>Multi-sample comparison</strong><br>
-      <sub>Stacked BAM panels with sample-matched companion VCFs.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2">
       <a href="out/35_multi_sample_batch_report.png"><img src="out/35_multi_sample_batch_report.png" alt="Multi-sample batch report with a grouped variant index, per-sample metrics, and embedded comparison plots"></a><br>
       <strong>Multi-sample batch report</strong><br>
-      <sub>BED/VCF candidates become an ordered, self-contained HTML review with shared-scale sample panels and changes versus the first BAM.</sub>
+      <sub>BED/VCF candidates become a self-contained review with shared-scale sample panels and comparison metrics.</sub>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <a href="out/15_view_as_pairs.png"><img src="out/15_view_as_pairs.png" alt="Paired reads linked on shared alignment rows"></a><br>
-      <strong>View as pairs</strong><br>
-      <sub>Visible primary mates share rows and are connected across their genomic gap.</sub>
+      <a href="out/36_tag_grouped_reads.png"><img src="out/36_tag_grouped_reads.png" alt="Reads grouped into three labelled and distinctly coloured BAM read-group lanes"></a><br>
+      <strong>Group and colour reads by BAM tag</strong><br>
+      <sub>RG, CB, or other SAM-tag values form labelled lanes with deterministic or user-defined colours.</sub>
     </td>
     <td width="50%">
-      <a href="out/06_mate_view_discordant.png"><img src="out/06_mate_view_discordant.png" alt="Primary locus beside an inferred discordant-mate window"></a><br>
-      <strong>Two-locus mate window</strong><br>
-      <sub>The requested locus is shown beside the automatically inferred discordant-mate region.</sub>
+      <a href="out/37_long_read_modifications.png"><img src="out/37_long_read_modifications.png" alt="ONT-style long reads coloured by strand with 5mC and 6mA calls on reads and in an aggregate fraction track"></a><br>
+      <strong>Long reads and base modifications</strong><br>
+      <sub>Strand-aware long reads retain CIGAR events while MM/ML calls appear per read and as aggregate fractions.</sub>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <a href="out/22_sort_by_snv_base.png"><img src="out/22_sort_by_snv_base.png" alt="Reads grouped by their nucleotide at a selected SNV"></a><br>
-      <strong>Sort by SNV base</strong><br>
-      <sub>Alternative-allele reads are grouped and prioritized at the selected position.</sub>
+      <a href="out/38_custom_track_plugin.png"><img src="out/38_custom_track_plugin.png" alt="External GC-content plugin track rendered above LocusSnap coverage and alignments"></a><br>
+      <strong>Custom track plugin API</strong><br>
+      <sub>An external API-v1 plugin draws GC content while LocusSnap manages layout, grids, labels, and export.</sub>
     </td>
     <td width="50%">
-      <a href="out/11_custom_track_definitions.png"><img src="out/11_custom_track_definitions.png" alt="BED, GTF, and VCF tracks in one genomic snapshot"></a><br>
-      <strong>Mixed custom tracks</strong><br>
-      <sub>BED regions, transcript models, and VCF variants are composed in one figure.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <a href="out/32_close_zoom_softclipped_bases.png"><img src="out/32_close_zoom_softclipped_bases.png" alt="Close genomic zoom showing individual soft-clipped nucleotide letters"></a><br>
-      <strong>Soft-clipped bases at close zoom</strong><br>
-      <sub>A 40 bp expanded view retains each read's background while colouring the clipped A/C/G/T letters like IGV.</sub>
-    </td>
-    <td width="50%">
-      <a href="out/33_close_zoom_insertions.png"><img src="out/33_close_zoom_insertions.png" alt="Close genomic zoom showing purple insertion markers at a shared breakpoint"></a><br>
-      <strong>Insertions at close zoom</strong><br>
-      <sub>Short CIGAR insertions appear as narrow purple breakpoint markers with a white I, matching IGV.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2">
-      <a href="out/34_explicit_multilocus_breakpoint.png"><img src="out/34_explicit_multilocus_breakpoint.png" alt="Explicit chr1 and chr2 breakpoint loci displayed as independently scaled linked columns"></a><br>
-      <strong>Explicit multi-locus breakpoint view</strong><br>
-      <sub>Repeated regions create independently scaled columns; breakpoint centres are linked while reciprocal chr1–chr2 pairs, split reads, soft clips, coverage, and VCF breakends remain aligned.</sub>
+      <a href="out/39_hic_tads_loops.png"><img src="out/39_hic_tads_loops.png" alt="Reddish triangular Hi-C contact map with called TAD domains and scored BEDPE loops above sequencing alignments"></a><br>
+      <strong>Hi-C contact maps, TADs, and loops</strong><br>
+      <sub>A red-white triangular contact map accompanies domain boundaries and score-scaled BEDPE arcs.</sub>
     </td>
   </tr>
 </table>
@@ -189,8 +145,7 @@ out/demo_data/
 └── variants/     # VCF and tabix indexes
 ```
 
-Rebuild the demo inputs, indexes, and the twelve curated figures shown above
-with:
+Rebuild the demo inputs, indexes, and curated figure set with:
 
 ```bash
 bash regenerate_demo_examples.sh
@@ -420,6 +375,33 @@ entries and summarizes additional high-cardinality values, so tags such as
 barcodes or categories should be shown. Generic tag views and
 `--haplotype_view` are mutually exclusive because both control read colour.
 
+### Long-read mode and base modifications
+
+Use the ONT/PacBio preset on a BAM carrying standard `MM`/`ML` tags:
+
+```bash
+locus-snap \
+  --bam nanopore.bam \
+  --fasta reference.fa \
+  --region chr1:100001-105000 \
+  --long_read_mode \
+  --min_mod_probability 0.70 \
+  --output_name long_reads
+```
+
+Long-read mode colours primary alignments by forward/reverse strand and gives
+supplementary alignments a separate colour. It also enables base-modification
+display when tags are present. At close zoom, confident calls are overlaid on
+the read body; an additional track reports the fraction of canonical-base
+depth carrying a call above the probability threshold. No empty modification
+track is added when the BAM has no calls.
+
+Use `--base_modifications` without the preset to keep ordinary alignment
+colours. Repeat `--modification_code` to restrict the view; SAM codes (`m`,
+`h`, `a`), canonical forms (`C+m`), and labels (`5mC`, `5hmC`, `6mA`) are
+accepted. `--long_read_mode` defaults to squish display unless an explicit CLI
+or YAML `display_mode` is supplied.
+
 ### RNA-seq sashimi view
 
 ```bash
@@ -573,10 +555,130 @@ Quote the entire value so `#` is not treated as a shell comment.
 | BigWig | the same, distributed as an indexed binary file | continuous filled profile |
 | SEG | segmented copy number | gain/loss log2 track |
 | bedGraph/log2/CNV | binned or segmented log2 ratios | signed zero-centered track |
+| TAD/domains | called Hi-C domains | translucent domain triangles and boundary guides |
+| BEDPE | Hi-C loops and binned contact scores | score-scaled arcs or a triangular contact map |
 
 The accepted custom `TYPE` values are `bed`, `gff`, `gff3`, `gtf`, `vcf`,
 `narrowpeak`, `broadpeak`, `peak`, `signal`, `bigwig` (alias `bw`), `seg`,
-`bedgraph`, `log2`, `cnv`, and `auto`.
+`bedgraph`, `log2`, `cnv`, `tad`, `bedpe`, and `auto`.
+
+### Hi-C TADs and chromatin loops
+
+LocusSnap accepts processed Hi-C feature calls alongside BAMs and all other
+tracks. A `tad` file is BED-like and zero-based: chromosome, start, end, then
+optional name and numeric boundary/domain score. Files ending in `.tad`,
+`.domains`, `.tad.bed`, or `.domains.bed` are detected automatically.
+
+BEDPE files require the standard first six anchor columns. Optional column 7
+supplies the contact name and column 8 its numeric score. Use `arcs` for called
+loops: larger scores receive stronger arcs, and a visible inter-chromosomal
+anchor is marked with its partner chromosome. Use `triangle` for binned cis
+contacts: each scored bin pair becomes a cell in a rotated triangular contact
+map. Its default white-to-red intensity scale follows the familiar visual
+language of Hi-C maps such as
+[Rao et al. (2014)](https://pmc.ncbi.nlm.nih.gov/articles/PMC5635824/).
+
+```bash
+locus-snap \
+  --bam sample.bam \
+  --region chr8:127000000-130000000 \
+  --custom_track 'sample.contacts.bedpe,bedpe,Contact map,#b2182b,triangle,1.6' \
+  --custom_track 'sample.tad.bed,tad,Called TADs,#a50f15,collapse,1.0' \
+  --custom_track 'sample.loops.bedpe,bedpe,Hi-C loops,#b2182b,arcs,1.0' \
+  --output_name hic-context
+```
+
+The custom-track `COLOR` controls the high-contact end of the map. YAML keys
+`track_colors.hic_contact_low`, `styles.hic_contact_gamma`,
+`styles.hic_contact_map_alpha`, `styles.hic_contact_cell_edge_width`, and
+`styles.hic_track_height_in` control the pale endpoint, intensity response,
+opacity, cell borders, and default physical height. TAD and arc colours remain
+independently configurable with `track_colors.tad` and
+`track_colors.hic_loop`.
+
+Plain text works directly. Large TAD or BEDPE collections can be BGZF-compressed
+and indexed on their first interval with `tabix -p bed`; local cis loops are
+then fetched by their first anchor. Store reciprocal rows when a compressed
+BEDPE should also be discoverable from either side of a trans contact.
+
+This interface renders domain and loop calls derived from Hi-C. Raw `.hic` and
+`.cool` contact matrices are not read directly; export TADs to BED-like records
+or loops to BEDPE first.
+
+### Custom track plugin API
+
+External packages can add arbitrary quantitative or categorical tracks without
+editing LocusSnap. A plugin implements the public API-v1 base class:
+
+```python
+from locus_snap import TrackCanvas, TrackPlugin, TrackRegion
+
+class ScoreTrack(TrackPlugin):
+    name = "score-track"
+    default_label = "Model score"
+    default_height_in = 0.9
+    default_color = "#188977"
+
+    def fetch(self, region: TrackRegion, options):
+        # Return any payload; region coordinates are zero-based, half-open.
+        return query_scores(region.chrom, region.start, region.end, options)
+
+    def render(self, canvas: TrackCanvas, payload, region, options):
+        canvas.set_y_limits(0, 1)
+        canvas.set_y_ticks([0, 0.5, 1], ["0", ".5", "1"])
+        canvas.fill_between(payload.positions, payload.values, alpha=0.25)
+        canvas.line(payload.positions, payload.values)
+```
+
+Register it from the plugin package's `pyproject.toml`:
+
+```toml
+[project.entry-points."locus_snap.track_plugins.v1"]
+model-score = "my_locus_plugin:ScoreTrack"
+```
+
+After installing that package, use the entry-point name and repeat the option
+for multiple tracks:
+
+```bash
+locus-snap \
+  --bam sample.bam \
+  --region chr1:100001-101000 \
+  --plugin_track model-score sample=tumour smoothing=25 \
+    'track_label=Tumour model score' track_height=1.0 'track_color=#188977'
+```
+
+`track_label`, `track_height`, and `track_color` are reserved layout options;
+every other `KEY=VALUE` is passed to the plugin as a read-only mapping. During
+development, an explicit `module:object` target works without packaging:
+
+```bash
+--plugin_track my_package.tracks:ScoreTrack sample=tumour
+```
+
+The stable `TrackCanvas` supplies `line`, `step`, `fill_between`, `bars`,
+`scatter`, `rectangle`, `span`, `horizontal_line`, `text`, and y-axis methods.
+It deliberately does not expose Matplotlib axes: LocusSnap continues to own
+genomic limits, shared grids, highlights, panel layout, titles, and export.
+Fetch and rendering failures include the plugin name and locus. Plugins used
+with multi-process `--batch_regions --threads N` should keep their configured
+plugin instance picklable.
+
+For programmatic use, pass a configured source directly:
+
+```python
+from locus_snap import PluginTrackSource
+from locus_snap.snapshot import BamSnapshot
+
+snapshot = BamSnapshot(
+    bam="sample.bam", chrom="chr1", start=100_000, end=101_000,
+    plugin_tracks=[PluginTrackSource(ScoreTrack(), {"sample": "tumour"})],
+)
+snapshot.snap()
+```
+
+See [`examples/gc_content_plugin.py`](examples/gc_content_plugin.py) for the
+complete plugin used by the gallery example.
 
 ### BigWig tracks
 
@@ -765,10 +867,12 @@ Every track height is configurable:
 |---|---|
 | Alignments | `row_height_in`, `squish_row_height_in` |
 | Coverage | `coverage_track_height_in` |
+| Base modifications | `modification_track_height_in` |
 | BED/GFF/GTF/VCF | `annotation_row_height_in` |
 | CNV | `cnv_track_height_in` |
 | BAF/LOH | `baf_track_height_in` |
 | Peaks/signal/density | `peak_track_height_in` |
+| TADs/Hi-C contact maps/loops | `hic_track_height_in` |
 | Sashimi | `sashimi_track_height_in` |
 | Reference bases | `reference_height_in` |
 | Ideogram | `ideogram_height_in` |
@@ -844,8 +948,13 @@ CIGAR insertion and deletion lengths are hidden by default. Show them with
 | `--color_by_tag TAG` | colour reads by a BAM tag without changing row placement |
 | `--tag_filter VALUE [...]` | retain selected tag values, including `untagged` |
 | `--tag_color VALUE=COLOR` | override a tag value colour; repeatable |
+| `--long_read_mode` | strand-aware long-read display with automatic MM/ML support |
+| `--base_modifications` | show MM/ML calls without changing ordinary read colours |
+| `--modification_code CODE` | retain one modification type; repeatable |
+| `--min_mod_probability F` | confidence threshold for read markers and fractions |
 | `--track PATH` | add a genomic track; repeatable |
 | `--custom_track SPEC` | add a named, coloured, sized track |
+| `--plugin_track PLUGIN KEY=VALUE ...` | add an installed API-v1 track plugin or `module:object` target |
 | `--config YAML` | reusable defaults and styles |
 | `--metrics_tsv PATH` | export per-read classifications and metrics |
 | `--fig_width INCHES --dpi N` | output size and raster resolution |

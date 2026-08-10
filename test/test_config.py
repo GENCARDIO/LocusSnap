@@ -12,6 +12,7 @@ from locus_snap.config import (
     DEFAULT_BASE_COLORS,
     DEFAULT_CHROMOSOME_COLORS,
     DEFAULT_INSERTION_COLOR,
+    DEFAULT_LONG_READ_COLORS,
     DEFAULT_VISUAL_COLORS,
     load_alignment_colors,
     load_config,
@@ -63,6 +64,26 @@ def test_renderer_uses_configured_pair_category_color():
     color, alpha = renderer.read_style(read)
     assert color == "#010203"
     assert alpha == 0.9
+
+
+def test_long_read_mode_colours_strand_and_supplementary_alignments():
+    renderer = AlignmentRenderer(long_read_mode=True, shade_by_mapq=False)
+    forward = SimpleNamespace(
+        is_supplementary=False, is_reverse=False, is_secondary=False,
+        is_duplicate=False, mapq=60,
+    )
+    reverse = SimpleNamespace(
+        is_supplementary=False, is_reverse=True, is_secondary=False,
+        is_duplicate=False, mapq=60,
+    )
+    supplementary = SimpleNamespace(
+        is_supplementary=True, is_reverse=False, is_secondary=False,
+        is_duplicate=False, mapq=60,
+    )
+
+    assert renderer.read_style(forward)[0] == DEFAULT_LONG_READ_COLORS["forward"]
+    assert renderer.read_style(reverse)[0] == DEFAULT_LONG_READ_COLORS["reverse"]
+    assert renderer.read_style(supplementary)[0] == DEFAULT_LONG_READ_COLORS["supplementary"]
 
 
 def test_default_small_insert_is_darker_than_rr_and_distinct_from_cigar_insertions():
@@ -303,3 +324,27 @@ def test_squish_outline_can_be_disabled_in_yaml(tmp_path):
     theme = load_config(str(config))
 
     assert theme["styles"]["squish_alignment_edge_width"] == 0
+
+
+def test_hic_contact_map_palette_and_response_are_configurable(tmp_path):
+    config = tmp_path / "hic.yaml"
+    config.write_text(
+        "track_colors:\n"
+        "  tad: '#7f0000'\n"
+        "  hic_loop: '#cc0000'\n"
+        "  hic_contact_low: '#fffbe6'\n"
+        "styles:\n"
+        "  hic_contact_gamma: 0.5\n"
+        "  hic_contact_map_alpha: 0.85\n"
+        "  hic_contact_cell_edge_width: 0\n",
+        encoding="utf-8",
+    )
+
+    theme = load_config(str(config))
+
+    assert theme["track_colors"]["tad"] == "#7f0000"
+    assert theme["track_colors"]["hic_loop"] == "#cc0000"
+    assert theme["track_colors"]["hic_contact_low"] == "#fffbe6"
+    assert theme["styles"]["hic_contact_gamma"] == pytest.approx(0.5)
+    assert theme["styles"]["hic_contact_map_alpha"] == pytest.approx(0.85)
+    assert theme["styles"]["hic_contact_cell_edge_width"] == 0

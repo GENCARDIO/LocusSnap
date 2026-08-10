@@ -51,6 +51,7 @@ from locus_snap.snapshot import (
     compare_snapshots,
     render_multi_locus_snapshots,
 )
+from locus_snap.track_plugin import build_plugin_track_sources
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger("locus_snap")
@@ -284,7 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
     track_group.add_argument(
         "--track", action="append", metavar="PATH",
         help=("BED, GFF/GFF3, GTF, VCF, narrowPeak/broadPeak, signal, BigWig, SEG, "
-              "bedGraph, or log2/CNV track; "
+              "bedGraph, log2/CNV, TAD/domain, or BEDPE Hi-C loop track; "
               "repeat for multiple tracks. "
               "Compressed tracks require a .tbi or .csi tabix index; "
               "BigWig (.bw/.bigWig) is self-indexed and needs no separate index file."),
@@ -299,14 +300,22 @@ def build_parser() -> argparse.ArgumentParser:
               "'FILE,TYPE,NAME,COLOR[,DISPLAY[,HEIGHT_IN]]'; repeat as needed. "
               "The legacy FILE TYPE NAME COLOR [DISPLAY [HEIGHT_IN]] form remains accepted. "
               "TYPE is bed, gff, gff3, gtf, vcf, narrowpeak, broadpeak, peak, "
-              "signal, bigwig, seg, bedgraph, log2, cnv, or auto. "
+              "signal, bigwig, seg, bedgraph, log2, cnv, tad, bedpe, or auto. "
               "bigwig (alias bw) loads as a signal track by default; point a .bw file "
               "at TYPE bedgraph/log2/cnv instead for signed values. "
               "COLOR accepts hex, R,G,B, or rgb(R,G,B). "
               "DISPLAY optionally overrides --track_display with collapse, pack, expand, "
-              "or density; HEIGHT_IN optionally sets this track's physical height. "
+              "or density; BEDPE also accepts arcs or triangle. HEIGHT_IN optionally "
+              "sets this track's physical height. "
               "BGZF files require .tbi/.csi and are fetched by genomic region with tabix; "
               "BigWig (.bw/.bigWig) is self-indexed and needs no separate index file."),
+    )
+    track_group.add_argument(
+        "--plugin_track", action="append", nargs="+", metavar=("PLUGIN", "KEY=VALUE"),
+        help=("Add a third-party track registered in the "
+              "locus_snap.track_plugins.v1 entry-point group, or load an explicit "
+              "module:object target. Additional fields use KEY=VALUE. Reserved "
+              "layout keys are track_label, track_height, and track_color."),
     )
     track_group.add_argument(
         "--track_display", choices=ANNOTATION_DISPLAY_MODES, default="pack",
@@ -409,6 +418,27 @@ def build_parser() -> argparse.ArgumentParser:
     tag_group.add_argument(
         "--tag_label", metavar="LABEL",
         help="Human-readable lane and legend title; defaults to 'Tag TAG'.",
+    )
+    long_read_group = parser.add_argument_group("long reads and base modifications")
+    long_read_group.add_argument(
+        "--long_read_mode", action="store_true",
+        help=("Use strand-aware ONT/PacBio alignment colours and automatically "
+              "display MM/ML base modifications when present. "
+              "Defaults to squish display unless --display_mode is set explicitly."),
+    )
+    long_read_group.add_argument(
+        "--base_modifications", action="store_true",
+        help=("Decode SAM MM/ML tags, mark confident calls on reads at close zoom, "
+              "and add a modified/canonical fraction track."),
+    )
+    long_read_group.add_argument(
+        "--modification_code", action="append", metavar="CODE",
+        help=("Show only one base-modification code; repeat as needed. Accepts SAM "
+              "codes such as m, h, or a and labels such as 5mC, 5hmC, or 6mA."),
+    )
+    long_read_group.add_argument(
+        "--min_mod_probability", type=float, default=0.5, metavar="FRACTION",
+        help="Minimum MM/ML probability counted and drawn as a modified base.",
     )
     parser.add_argument(
         "--sort_by", choices=sorted(SORT_KEYS), default="gap_length",
@@ -604,6 +634,16 @@ def main(argv=None) -> int:
         return 1
     args = parser.parse_args(command_args)
 
+    if (
+        args.long_read_mode
+        and not any(
+            token == "--display_mode" or token.startswith("--display_mode=")
+            for token in command_args
+        )
+        and "display_mode" not in visual_config["preferences"]
+    ):
+        args.display_mode = "squish"
+
     bam_paths = list(args.bam)
     if args.bam2:
         bam_paths.append(args.bam2)
@@ -738,6 +778,12 @@ def main(argv=None) -> int:
     if args.min_baseq < 0 or args.min_variant_mapq < 0:
         log.error("--min_baseq and --min_variant_mapq cannot be negative.")
         return 1
+    if not 0 <= args.min_mod_probability <= 1:
+        log.error("--min_mod_probability must be between 0 and 1.")
+        return 1
+    if args.long_read_mode and args.view_as_pairs:
+        log.error("--long_read_mode cannot be combined with --view_as_pairs.")
+        return 1
     if args.group_by_tag and args.color_by_tag:
         log.error("--group_by_tag and --color_by_tag are mutually exclusive.")
         return 1
@@ -785,6 +831,7 @@ def main(argv=None) -> int:
             primary_isoforms=args.primary_isoforms,
             track_colors=visual_config["track_colors"],
         ))
+        annotation_sources.extend(build_plugin_track_sources(args.plugin_track))
         annotation_sources.extend(build_baf_sources(
             args.baf_vcf, labels=args.baf_track_label, samples=args.baf_sample,
             track_colors=visual_config["track_colors"],
@@ -885,6 +932,13 @@ def main(argv=None) -> int:
         tag_filter=tag_filter,
         tag_label=args.tag_label,
         tag_colors=tag_colors,
+        long_read_mode=args.long_read_mode,
+        show_base_modifications=(
+            args.base_modifications or args.long_read_mode
+            or bool(args.modification_code)
+        ),
+        modification_codes=args.modification_code,
+        min_mod_probability=args.min_mod_probability,
         annotate_gap=not args.no_annotate,
         show_indel_lengths=args.show_indel_lengths,
         fig_width=args.fig_width,
@@ -898,7 +952,7 @@ def main(argv=None) -> int:
         only_types=args.only,
         min_softclip=args.min_softclip,
         insert_size_sigma=args.insert_size_sigma,
-        pair_colors=not args.no_pair_colors,
+        pair_colors=not args.no_pair_colors and not args.long_read_mode,
         shade_by_mapq=not args.no_mapq_shading,
         mapq_cap=args.mapq_cap,
         alignment_colors=alignment_colors,

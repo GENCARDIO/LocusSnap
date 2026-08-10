@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import pysam
 
@@ -50,6 +50,43 @@ class SAEntry:
     cigar: str
     mapq: int
     nm: int
+
+
+@dataclass(frozen=True)
+class BaseModification:
+    """One MM/ML modification call mapped from query to reference space."""
+
+    ref_position: int
+    query_position: int
+    canonical_base: str
+    strand: int
+    code: Union[str, int]
+    probability: Optional[float]
+
+    @property
+    def label(self) -> str:
+        return modification_label(self.canonical_base, self.code)
+
+    @property
+    def aligned_base(self) -> str:
+        """Canonical base as stored in the reference-oriented BAM sequence."""
+        if self.strand == 0:
+            return self.canonical_base
+        return self.canonical_base.translate(str.maketrans("ACGT", "TGCA"))
+
+
+MODIFICATION_LABELS = {
+    ("C", "m"): "5mC",
+    ("C", "h"): "5hmC",
+    ("A", "a"): "6mA",
+}
+
+
+def modification_label(canonical_base: str, code: Union[str, int]) -> str:
+    """Return a compact label for common SAM base-modification codes."""
+    base = str(canonical_base).upper()
+    code_text = str(code)
+    return MODIFICATION_LABELS.get((base, code_text), f"{base}+{code_text}")
 
 
 def iter_cigar_blocks(cigartuples, ref_start: int):
@@ -208,6 +245,7 @@ class AlignedRead:
         reference: Optional[ReferenceWindow] = None,
         haplotype_tag: str = "HP", phase_set_tag: str = "PS",
         read_tag: Optional[str] = None,
+        parse_base_modifications: bool = True,
     ):
         self.segment = segment
         seg = segment
@@ -265,6 +303,7 @@ class AlignedRead:
         self.hard_clip_right = 0
         self.mismatches: List[Tuple[int, str]] = []
         self.mismatch_details: List[Tuple[int, str, int]] = []
+        self.base_modifications: List[BaseModification] = []
 
         cigartuples = seg.cigartuples
         if cigartuples:
@@ -320,6 +359,41 @@ class AlignedRead:
         )
 
         self.gap_length = max(self.cigar_gap_len, self.sa_gap_len)
+
+        # pysam decodes the SAM MM/Mm delta encoding and pairs it with ML/Ml
+        # probabilities.  Its query positions use the same orientation as
+        # get_reference_positions(full_length=True), including for reverse
+        # alignments, so the two arrays can be joined directly.
+        if parse_base_modifications and (seg.has_tag("MM") or seg.has_tag("Mm")):
+            try:
+                modified = seg.modified_bases or {}
+                reference_positions = seg.get_reference_positions(full_length=True)
+                for (canonical_base, mod_strand, code), calls in modified.items():
+                    for query_position, quality in calls:
+                        if not 0 <= query_position < len(reference_positions):
+                            continue
+                        ref_position = reference_positions[query_position]
+                        if ref_position is None:
+                            # Soft-clipped modification calls have no genomic
+                            # position and therefore cannot be placed on a track.
+                            continue
+                        probability = None if quality < 0 else min(quality / 256.0, 1.0)
+                        self.base_modifications.append(BaseModification(
+                            ref_position=ref_position,
+                            query_position=query_position,
+                            canonical_base=str(canonical_base).upper(),
+                            strand=int(mod_strand),
+                            code=code,
+                            probability=probability,
+                        ))
+                self.base_modifications.sort(
+                    key=lambda item: (item.ref_position, item.label, item.query_position)
+                )
+            except (TypeError, ValueError):
+                # Malformed optional tags should not make the underlying
+                # alignment unusable. htslib may also report the malformed
+                # tag on stderr, as it does for other invalid BAM auxiliaries.
+                self.base_modifications = []
 
     @property
     def is_discordant(self) -> bool:
@@ -408,6 +482,7 @@ def fetch_reads(
     haplotype_filter: Optional[List[str]] = None,
     read_tag: Optional[str] = None,
     tag_filter: Optional[List[str]] = None,
+    parse_base_modifications: bool = False,
 ) -> List[AlignedRead]:
     """Fetch + filter + featurize every alignment overlapping [start, end).
 
@@ -434,6 +509,7 @@ def fetch_reads(
                 segment, reference,
                 haplotype_tag=haplotype_tag, phase_set_tag=phase_set_tag,
                 read_tag=read_tag,
+                parse_base_modifications=parse_base_modifications,
             )
             if haplotype_filter:
                 haplotype_value = read.haplotype if read.haplotype is not None else "untagged"

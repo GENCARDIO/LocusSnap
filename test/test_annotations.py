@@ -32,8 +32,87 @@ def test_format_inference_handles_plain_and_compressed_names():
     assert infer_track_format("H3K27ac.narrowPeak.gz") == "narrowpeak"
     assert infer_track_format("H3K27me3.broadPeak") == "broadpeak"
     assert infer_track_format("DNase.signal.bgz") == "signal"
+    assert infer_track_format("sample.tad") == "tad"
+    assert infer_track_format("sample.domains.gz") == "tad"
+    assert infer_track_format("sample.tad.bed") == "tad"
+    assert infer_track_format("sample.loops.bedpe.gz") == "bedpe"
     with pytest.raises(ValueError, match="Cannot infer"):
         infer_track_format("track.txt")
+
+
+def test_tad_track_parses_domains_names_scores_and_overlaps(tmp_path):
+    domains = tmp_path / "sample.tad"
+    domains.write_text(
+        "chr1\t100\t300\tTAD_A\t8.5\n"
+        "chr1\t260\t520\tTAD_B\t12\n"
+        "chr2\t100\t300\tother\t4\n",
+        encoding="utf-8",
+    )
+
+    track = AnnotationSource(str(domains)).fetch("chr1", 250, 400)
+
+    assert track.kind == "tad"
+    assert track.color == "#a50f15"
+    assert len(track.rows) == 1
+    assert [(item.start, item.end, item.name, item.value) for item in track.items] == [
+        (100, 300, "TAD_A", 8.5),
+        (260, 520, "TAD_B", 12.0),
+    ]
+
+
+def test_bedpe_track_parses_cis_and_visible_trans_contacts(tmp_path):
+    loops = tmp_path / "sample.bedpe"
+    loops.write_text(
+        "chr1\t100\t120\tchr1\t300\t320\tloop_A\t25\n"
+        "chr1\t150\t170\tchr2\t500\t530\ttrans_A\t8\n"
+        "chr2\t40\t60\tchr1\t180\t200\ttrans_B\t7\n"
+        "chr2\t10\t20\tchr2\t30\t40\toutside\t3\n",
+        encoding="utf-8",
+    )
+
+    track = AnnotationSource(str(loops)).fetch("chr1", 90, 350)
+
+    assert track.kind == "bedpe"
+    assert track.color == "#b2182b"
+    assert track.display_mode == "arcs"
+    assert [item.name for item in track.items] == ["loop_A", "trans_A", "trans_B"]
+    assert track.items[0].group == "chr1"
+    assert track.items[0].chrom2 == "chr1"
+    assert (track.items[0].start2, track.items[0].end2) == (300, 320)
+
+
+def test_hic_track_type_aliases_are_accepted_for_custom_files(tmp_path):
+    domains = tmp_path / "domains.data"
+    loops = tmp_path / "loops.data"
+    domains.write_text("chr1\t10\t30\n", encoding="utf-8")
+    loops.write_text("chr1\t10\t20\tchr1\t40\t50\n", encoding="utf-8")
+
+    assert AnnotationSource(str(domains), kind="domains").kind == "tad"
+    assert AnnotationSource(str(loops), kind="loops").kind == "bedpe"
+
+
+def test_bedpe_accepts_arc_and_triangular_contact_map_modes(tmp_path):
+    loops = tmp_path / "loops.bedpe"
+    loops.write_text(
+        "chr1\t10\t20\tchr1\t40\t50\tloop\t8\n", encoding="utf-8"
+    )
+
+    assert AnnotationSource(str(loops), display_mode="arcs").display_mode == "arcs"
+    assert AnnotationSource(str(loops), display_mode="triangle").display_mode == "triangle"
+    with pytest.raises(ValueError, match="BEDPE display mode"):
+        AnnotationSource(str(loops), display_mode="density")
+
+
+def test_invalid_tad_and_bedpe_coordinates_are_rejected(tmp_path):
+    domains = tmp_path / "bad.tad"
+    loops = tmp_path / "bad.bedpe"
+    domains.write_text("chr1\t30\t10\n", encoding="utf-8")
+    loops.write_text("chr1\t10\t10\tchr1\t40\t50\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="TAD interval end"):
+        AnnotationSource(str(domains)).fetch("chr1", 0, 100)
+    with pytest.raises(ValueError, match="BEDPE anchor end"):
+        AnnotationSource(str(loops)).fetch("chr1", 0, 100)
 
 
 def test_bed12_builds_thick_coding_blocks_and_thin_utrs(tmp_path):
