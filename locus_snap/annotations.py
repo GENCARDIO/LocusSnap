@@ -8,6 +8,7 @@ from math import isfinite
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+import pyBigWig
 import pysam
 from matplotlib.colors import is_color_like, to_hex
 
@@ -72,7 +73,7 @@ def default_label(path: str) -> str:
             lower = lower[:-len(suffix)]
             break
     for suffix in (
-        ".narrowpeak", ".broadpeak", ".bedgraph", ".signal",
+        ".narrowpeak", ".broadpeak", ".bedgraph", ".signal", ".bigwig", ".bw",
         ".gff3", ".gff", ".gtf", ".bed", ".vcf", ".peak",
         ".seg", ".bdg", ".log2", ".cnv",
     ):
@@ -90,10 +91,16 @@ def infer_track_format(path: str) -> str:
     suffix = Path(name).suffix.lstrip(".")
     if suffix == "bdg":
         return "bedgraph"
+    if suffix in ("bw", "bigwig"):
+        # BigWig is a storage format, not a distinct semantic track type - it
+        # loads as a "signal" (continuous, non-negative) track by default.
+        # Point --custom_track at it with an explicit bedgraph/log2/cnv TYPE
+        # instead if the data is signed.
+        return "signal"
     if suffix not in SUPPORTED_TRACK_FORMATS:
         raise ValueError(
             f"Cannot infer annotation format for '{path}'. Expected .bed, .gff, .gff3, .gtf, "
-            ".vcf, .narrowPeak, .broadPeak, .peak, .signal, .seg, "
+            ".vcf, .narrowPeak, .broadPeak, .peak, .signal, .bigwig/.bw, .seg, "
             ".bedgraph/.bdg, .log2, or .cnv"
             " (optionally followed by .gz/.bgz/.bgzf)."
         )
@@ -787,6 +794,8 @@ class AnnotationSource:
             explicit_kind = None
         if explicit_kind == "bdg":
             explicit_kind = "bedgraph"
+        if explicit_kind in ("bigwig", "bw"):
+            explicit_kind = "signal"
         if explicit_kind is not None and explicit_kind not in SUPPORTED_TRACK_FORMATS:
             raise ValueError(
                 f"Unsupported annotation type '{kind}'. Choose bed, gff, gff3, gtf, vcf, "
@@ -826,6 +835,7 @@ class AnnotationSource:
         else:
             self.color = colors["gene"]
         self.compressed = Path(self.path).name.lower().endswith(COMPRESSED_SUFFIXES)
+        self.is_bigwig = Path(self.path).name.lower().endswith((".bw", ".bigwig"))
         if not Path(self.path).is_file():
             raise ValueError(f"Annotation track not found: {self.path}")
         if self.compressed:
@@ -844,6 +854,18 @@ class AnnotationSource:
             except (OSError, ValueError) as exc:
                 raise ValueError(
                     f"Cannot open BGZF/tabix annotation track '{self.path}': {exc}"
+                ) from exc
+        elif self.is_bigwig:
+            # BigWig is self-indexed (no separate .tbi/.csi); validate now
+            # rather than failing later during rendering, same rationale as
+            # the tabix check above. Region fetches use pyBigWig.intervals().
+            try:
+                with pyBigWig.open(self.path) as handle:
+                    if handle is None or not handle.isBigWig():
+                        raise ValueError(f"Not a valid BigWig file: {self.path}")
+            except RuntimeError as exc:
+                raise ValueError(
+                    f"Cannot open BigWig annotation track '{self.path}': {exc}"
                 ) from exc
 
     def iter_lines(self, chrom: str, start: int, end: int) -> Iterator[str]:
@@ -874,28 +896,61 @@ class AnnotationSource:
                         line = "\t".join(fields)
                     yield line
 
+    def _fetch_bigwig_items(self, chrom: str, start: int, end: int) -> List[AnnotationItem]:
+        with pyBigWig.open(self.path) as bw:
+            chrom_lengths = bw.chroms()
+            query_chrom = chrom
+            if query_chrom not in chrom_lengths:
+                alternate = chrom[3:] if chrom.startswith("chr") else f"chr{chrom}"
+                if alternate not in chrom_lengths:
+                    return []
+                query_chrom = alternate
+            query_start = max(0, start)
+            query_end = min(end, chrom_lengths[query_chrom])
+            if query_end <= query_start:
+                return []
+            intervals = bw.intervals(query_chrom, query_start, query_end)
+        if not intervals:
+            return []
+        items = []
+        for item_start, item_end, value in intervals:
+            if value is None or not isfinite(value):
+                continue
+            clipped_start, clipped_end = max(item_start, start), min(item_end, end)
+            if clipped_end <= clipped_start:
+                continue
+            items.append(AnnotationItem(
+                clipped_start, clipped_end, "", blocks=[(clipped_start, clipped_end)],
+                value=float(value),
+            ))
+        return items
+
     def fetch(self, chrom: str, start: int, end: int) -> LoadedAnnotationTrack:
-        lines = self.iter_lines(chrom, start, end)
-        if self.kind == "bed":
-            items = parse_bed(lines, chrom, start, end)
-        elif self.kind == "vcf":
-            items = parse_vcf(lines, chrom, start, end)
-        elif self.kind in ("bedgraph", "log2"):
-            items = parse_bedgraph(lines, chrom, start, end)
-        elif self.kind in SIGNAL_TRACK_FORMATS:
-            items = parse_bedgraph(lines, chrom, start, end)
+        if self.is_bigwig:
+            items = self._fetch_bigwig_items(chrom, start, end)
+        else:
+            lines = self.iter_lines(chrom, start, end)
+            if self.kind == "bed":
+                items = parse_bed(lines, chrom, start, end)
+            elif self.kind == "vcf":
+                items = parse_vcf(lines, chrom, start, end)
+            elif self.kind in ("bedgraph", "log2"):
+                items = parse_bedgraph(lines, chrom, start, end)
+            elif self.kind in SIGNAL_TRACK_FORMATS:
+                items = parse_bedgraph(lines, chrom, start, end)
+            elif self.kind in PEAK_TRACK_FORMATS:
+                items = parse_peak(lines, chrom, start, end, self.kind)
+            elif self.kind in ("seg", "cnv"):
+                items = parse_seg(lines, chrom, start, end)
+            else:
+                items = parse_gff(lines, chrom, start, end)
+        if self.kind in SIGNAL_TRACK_FORMATS:
             for item in items:
                 if item.value is not None and item.value < 0:
                     raise ValueError(
                         "Epigenomic signal tracks require non-negative values; "
                         "use bedgraph or log2 for signed copy-number data."
                     )
-        elif self.kind in PEAK_TRACK_FORMATS:
-            items = parse_peak(lines, chrom, start, end, self.kind)
-        elif self.kind in ("seg", "cnv"):
-            items = parse_seg(lines, chrom, start, end)
-        else:
-            items = parse_gff(lines, chrom, start, end)
         if self.kind in ("gff", "gff3", "gtf"):
             items = select_primary_isoforms(items, self.primary_isoforms)
         if (

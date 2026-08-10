@@ -372,6 +372,18 @@ def matches_only(read: AlignedRead, only_types: Optional[List[str]], min_softcli
     return False
 
 
+def open_alignment_file(path: str, reference: Optional[str] = None) -> pysam.AlignmentFile:
+    """Open a BAM or CRAM alignment file, picking the mode from the extension.
+
+    CRAM decoding needs the reference FASTA that was used to compress it;
+    ``reference`` is the same --fasta path already threaded through the rest
+    of the tool.
+    """
+    mode = "rc" if path.lower().endswith(".cram") else "rb"
+    kwargs = {"reference_filename": reference} if mode == "rc" else {}
+    return pysam.AlignmentFile(path, mode, **kwargs)
+
+
 def fetch_reads(
     bam_path: str,
     chrom: str,
@@ -398,7 +410,8 @@ def fetch_reads(
     window has been collected, not per-read during the fetch loop.
     """
     reads = []
-    with pysam.AlignmentFile(bam_path, "rb") as bam:
+    reference_fasta = reference.fasta_path if reference is not None else None
+    with open_alignment_file(bam_path, reference=reference_fasta) as bam:
         for segment in bam.fetch(chrom, max(0, start), end):
             if segment.is_unmapped and not include_unmapped:
                 continue

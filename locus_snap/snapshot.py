@@ -13,15 +13,13 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import pysam
-
 from locus_snap.annotations import AnnotationSource
 from locus_snap.cytobands import Cytoband, bands_for_chrom, resolve_cytobands
 from locus_snap.downsample import DEFAULT_MAX_ALIGNMENT_DEPTH, downsample_reads
 from locus_snap.layout import build_rows, infer_reference_base, truncate_rows
 from locus_snap.mate_window import MateWindow, choose_mate_window, supporting_query_names
 from locus_snap.metrics import RegionSummary, format_summary_table, summarize, write_tsv
-from locus_snap.read_model import AlignedRead, fetch_reads, matches_only
+from locus_snap.read_model import AlignedRead, fetch_reads, matches_only, open_alignment_file
 from locus_snap.reference import ReferenceWindow
 from locus_snap.render import (
     AlignmentRenderer,
@@ -220,7 +218,7 @@ class BamSnapshot:
         self.reads_loaded = False
 
     def load_reads(self) -> List[AlignedRead]:
-        with pysam.AlignmentFile(self.bam, "rb") as bam_file:
+        with open_alignment_file(self.bam, reference=self.fasta) as bam_file:
             self.contig_lengths = dict(zip(bam_file.references, bam_file.lengths))
         if self.show_ideogram:
             self.cytobands, self.cytoband_label = resolve_cytobands(
@@ -561,7 +559,7 @@ def compare_snapshots(
     if sort_by == "base" and base_position is None:
         base_position = start + (end - start) // 2
     reference_base = reference.base_at(base_position) if base_position is not None else None
-    with pysam.AlignmentFile(bam1, "rb") as bam_file:
+    with open_alignment_file(bam1, reference=fasta) as bam_file:
         contig_lengths = dict(zip(bam_file.references, bam_file.lengths))
     cytoband_label = None
     if show_ideogram:

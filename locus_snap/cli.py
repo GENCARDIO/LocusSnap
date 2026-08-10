@@ -18,8 +18,6 @@ import os
 import re
 import sys
 
-import pysam
-
 from locus_snap.annotations import (
     ANNOTATION_DISPLAY_MODES,
     PRIMARY_ISOFORM_MODES,
@@ -28,11 +26,14 @@ from locus_snap.annotations import (
     build_baf_sources,
     build_custom_annotation_sources,
 )
+from locus_snap.batch import (
+    BatchResult, looks_like_vcf, parse_bed_regions, parse_vcf_regions, write_html_report,
+)
 from locus_snap.config import load_config
 from locus_snap.downsample import DEFAULT_MAX_ALIGNMENT_DEPTH
 from locus_snap.layout import DISPLAY_MODES, HAPLOTYPE_VIEWS, SORT_KEYS
 from locus_snap.mate_window import MATE_WINDOW_SOURCES
-from locus_snap.read_model import ONLY_TYPES
+from locus_snap.read_model import ONLY_TYPES, open_alignment_file
 from locus_snap.refseq import (
     REFSEQ_LABELS, detect_human_assembly, ensure_refseq, normalize_assembly,
 )
@@ -87,13 +88,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--bam", action="append", required=True, metavar="BAM",
-        help="Indexed BAM input; repeat to stack any number of sample panels.",
+        help=("Indexed BAM or CRAM input; repeat to stack any number of sample panels. "
+              "CRAM requires --fasta to decode reads."),
     )
     parser.add_argument(
         "--bam2",
         help="Legacy second BAM option; equivalent to repeating --bam.",
     )
-    parser.add_argument("--region", required=True, help="Region as chrom:start-end (1-based, inclusive).")
+    region_group = parser.add_mutually_exclusive_group(required=True)
+    region_group.add_argument("--region", help="Region as chrom:start-end (1-based, inclusive).")
+    region_group.add_argument(
+        "--batch_regions", metavar="BED_OR_VCF",
+        help=("BED3/BED4 file, or a VCF/VCF.gz/BCF (one region per record, chosen by file "
+              "extension), of regions to render in one run (single --bam only). An optional "
+              "BED 4th column, or the VCF ID column when set, names each region (used as its "
+              "output filename stem). --flank matters here, especially for point variants: "
+              "with --flank 0 a SNV renders as a ~1bp-wide image. Combine with --report to "
+              "also build one HTML summary."),
+    )
+    parser.add_argument(
+        "--report", nargs="?", const="report.html", default=None, metavar="PATH",
+        help=("Write a self-contained HTML report (default report.html) summarizing every "
+              "--batch_regions snapshot with embedded images; requires --batch_regions and "
+              "a browser-viewable --output_format (png, jpg, jpeg, webp, or svg)."),
+    )
     parser.add_argument("--fasta", help="Reference FASTA (indexed or indexable). Enables mismatch/base coloring.")
     parser.add_argument(
         "--max_reference_span", type=int, default=DEFAULT_MAX_REFERENCE_SPAN, metavar="BP",
@@ -156,10 +174,11 @@ def build_parser() -> argparse.ArgumentParser:
     track_group = parser.add_argument_group("genomic and quantitative tracks")
     track_group.add_argument(
         "--track", action="append", metavar="PATH",
-        help=("BED, GFF/GFF3, GTF, VCF, narrowPeak/broadPeak, signal, SEG, "
+        help=("BED, GFF/GFF3, GTF, VCF, narrowPeak/broadPeak, signal, BigWig, SEG, "
               "bedGraph, or log2/CNV track; "
               "repeat for multiple tracks. "
-              "Compressed tracks require a .tbi or .csi tabix index."),
+              "Compressed tracks require a .tbi or .csi tabix index; "
+              "BigWig (.bw/.bigWig) is self-indexed and needs no separate index file."),
     )
     track_group.add_argument(
         "--track_label", action="append", metavar="LABEL",
@@ -171,11 +190,14 @@ def build_parser() -> argparse.ArgumentParser:
               "'FILE,TYPE,NAME,COLOR[,DISPLAY[,HEIGHT_IN]]'; repeat as needed. "
               "The legacy FILE TYPE NAME COLOR [DISPLAY [HEIGHT_IN]] form remains accepted. "
               "TYPE is bed, gff, gff3, gtf, vcf, narrowpeak, broadpeak, peak, "
-              "signal, seg, bedgraph, log2, cnv, or auto. "
+              "signal, bigwig, seg, bedgraph, log2, cnv, or auto. "
+              "bigwig (alias bw) loads as a signal track by default; point a .bw file "
+              "at TYPE bedgraph/log2/cnv instead for signed values. "
               "COLOR accepts hex, R,G,B, or rgb(R,G,B). "
               "DISPLAY optionally overrides --track_display with collapse, pack, expand, "
               "or density; HEIGHT_IN optionally sets this track's physical height. "
-              "BGZF files require .tbi/.csi and are fetched by genomic region with tabix."),
+              "BGZF files require .tbi/.csi and are fetched by genomic region with tabix; "
+              "BigWig (.bw/.bigWig) is self-indexed and needs no separate index file."),
     )
     track_group.add_argument(
         "--track_display", choices=ANNOTATION_DISPLAY_MODES, default="pack",
@@ -479,8 +501,28 @@ def main(argv=None) -> int:
     if not companion_vcfs:
         companion_vcfs = [None] * len(bam_paths)
 
+    if args.batch_regions:
+        if len(bam_paths) > 1:
+            log.error(
+                "--batch_regions does not yet support multiple --bam panels; "
+                "render one BAM at a time."
+            )
+            return 1
+        if args.sort_base_position is not None:
+            log.error("--sort_base_position cannot be combined with --batch_regions.")
+            return 1
+        if args.metrics_tsv or args.metrics_tsv2:
+            log.error("--metrics_tsv/--metrics_tsv2 are not supported with --batch_regions yet.")
+            return 1
+    elif args.report:
+        log.error("--report requires --batch_regions.")
+        return 1
+
     try:
-        chrom, start, end = parse_region(args.region, flank=args.flank)
+        if args.region:
+            chrom, start, end = parse_region(args.region, flank=args.flank)
+        else:
+            chrom = start = end = None
         highlight_regions = []
         for value in args.highlight or []:
             highlight_chrom, highlight_start, highlight_end = parse_region(
@@ -572,13 +614,19 @@ def main(argv=None) -> int:
     if args.fasta and not os.path.isfile(args.fasta):
         log.error("Cannot find --fasta file: %s", args.fasta)
         return 1
+    cram_paths = [bam_path for bam_path in bam_paths if bam_path.lower().endswith(".cram")]
+    if cram_paths and not args.fasta:
+        log.error(
+            "CRAM input requires --fasta to decode reads: %s", ", ".join(cram_paths)
+        )
+        return 1
 
     if args.refseq != "none":
         selected_refseq = args.refseq
         detected_assemblies = set()
         try:
             for bam_path in bam_paths:
-                with pysam.AlignmentFile(bam_path, "rb") as bam_file:
+                with open_alignment_file(bam_path, reference=args.fasta) as bam_file:
                     contig_lengths = dict(zip(bam_file.references, bam_file.lengths))
                 detected = detect_human_assembly(contig_lengths)
                 if detected:
@@ -668,6 +716,72 @@ def main(argv=None) -> int:
         annotation_sources=annotation_sources,
         view_as_pairs=args.view_as_pairs,
     )
+
+    if args.batch_regions:
+        try:
+            if looks_like_vcf(args.batch_regions):
+                regions = parse_vcf_regions(args.batch_regions, flank=args.flank)
+            else:
+                regions = parse_bed_regions(args.batch_regions, flank=args.flank)
+        except ValueError as exc:
+            log.error(str(exc))
+            return 1
+
+        if companion_vcfs[0]:
+            try:
+                annotation_sources.append(AnnotationSource(
+                    companion_vcfs[0], label=f"{sample_labels[0]} variants", kind="vcf",
+                    display_mode="collapse", track_colors=visual_config["track_colors"],
+                ))
+            except (OSError, ValueError) as exc:
+                log.error(str(exc))
+                return 1
+
+        results = []
+        for region in regions:
+            snap = BamSnapshot(
+                bam=bam_paths[0], chrom=region.chrom, start=region.start, end=region.end,
+                fasta=args.fasta, output_dir=args.output_dir, output_name=region.name,
+                output_format=args.output_format,
+                label=sample_labels[0], mate_view=args.mate_view,
+                mate_window_source=args.mate_window_source,
+                mate_window_size=args.mate_window_size,
+                show_alignments=not args.no_alignments,
+                **common_kwargs,
+            )
+            try:
+                summary = snap.snap()
+            except (OSError, ValueError) as exc:
+                log.warning("Region %s (%s) failed: %s", region.name, region.display, exc)
+                results.append(BatchResult(region=region, error=str(exc)))
+                continue
+            results.append(BatchResult(region=region, output_path=snap.output_path, summary=summary))
+            print(
+                f"{region.name} [{region.display}]: {summary.n_reads} reads | "
+                f"gapped: {summary.n_gapped} ({summary.pct_gapped:.1f}%) | "
+                f"max gap: {summary.max_gap}bp | split (SA): {summary.n_with_sa} | "
+                f"discordant: {summary.n_discordant} ({summary.pct_discordant:.1f}%) | "
+                f"soft-clipped: {summary.n_softclipped}"
+            )
+
+        n_failed = sum(1 for result in results if result.error)
+        log.info(
+            "Rendered %d/%d region(s)%s.",
+            len(results) - n_failed, len(results),
+            f" ({n_failed} failed)" if n_failed else "",
+        )
+
+        if args.report:
+            report_path = os.path.join(args.output_dir, args.report)
+            resolved_format = (args.output_format or "png").lower().lstrip(".")
+            try:
+                write_html_report(results, report_path, resolved_format)
+            except (OSError, ValueError) as exc:
+                log.error(str(exc))
+                return 1
+            log.info("Wrote batch report: %s", report_path)
+
+        return 1 if n_failed else 0
 
     if len(bam_paths) > 1:
         try:

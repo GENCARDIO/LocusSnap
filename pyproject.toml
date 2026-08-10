@@ -26,6 +26,7 @@ dependencies = [
     "pysam>=0.20",
     "matplotlib>=3.5",
     "PyYAML>=6.0",
+    "pyBigWig>=0.3.18",
 ]
 
 [project.optional-dependencies]

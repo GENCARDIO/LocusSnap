@@ -1,5 +1,7 @@
 # LocusSnap
 
+[![CI](https://github.com/GENCARDIO/LocusSnap/actions/workflows/ci.yml/badge.svg)](https://github.com/GENCARDIO/LocusSnap/actions/workflows/ci.yml)
+
 Create an IGV-like image from an indexed BAM without opening a genome browser.
 
 ## Install
@@ -38,11 +40,15 @@ python3 locus_snap.py \
 
 `python3 -m locus_snap ...` is equivalent when running from the repository.
 
-The BAM must be indexed. If it is not:
+The input can be BAM or CRAM and must be indexed. If it is not:
 
 ```bash
-samtools index sample.bam
+samtools index sample.bam    # produces sample.bam.bai
+samtools index sample.cram   # produces sample.cram.crai
 ```
+
+CRAM additionally requires `--fasta`, since decoding CRAM reads needs the same
+reference the file was compressed against.
 
 Regions are **1-based and inclusive**. Add `--flank 500` to show 500 bp on
 each side.
@@ -378,6 +384,62 @@ locus-snap \
 Repeat labels and companion VCFs in BAM order. Use `none` when a sample has no
 VCF. Each BAM keeps its own coverage, alignments, downsampling, and summary.
 
+### Batch rendering and reports
+
+Render every region in a BED file with one command, using a single BAM:
+
+```text
+# candidates.bed  (BED3/BED4: chrom, start, end[, name])
+chr9	101867480	101867620	MET_ex14
+chr1	100000	101000
+```
+
+```bash
+locus-snap \
+  --bam sample.bam \
+  --batch_regions candidates.bed \
+  --report \
+  --output_dir out/candidates
+```
+
+Each row renders to its own image, named from the optional 4th BED column (or
+`chrom_start_end` when omitted); `--flank`, `--display_mode`, `--track`, and
+every other single-region option still apply to every region. One bad region
+(e.g. a contig missing from the BAM) is logged and skipped rather than
+aborting the whole batch; the process exits non-zero if any region failed.
+
+`--batch_regions` also accepts a VCF/VCF.gz/BCF directly (picked by file
+extension) — one region per variant record, no BED needed:
+
+```bash
+locus-snap \
+  --bam sample.bam \
+  --batch_regions calls.vcf.gz \
+  --flank 50 \
+  --report \
+  --output_dir out/calls
+```
+
+Each region is named from the VCF `ID` column when set (e.g. an rsID),
+otherwise `chrom_pos_REF_ALT`. A multi-allelic line still renders as one
+region, not one per ALT. The variant span comes from the record's resolved
+start/end, so symbolic/structural records with an `INFO/END` (declared as
+`Type=Integer` in the VCF header, as any spec-compliant SV caller does) are
+handled automatically. **`--flank` matters more here than for BED**: most
+variants are point-sized, so `--flank 0` (the default) renders a ~1bp-wide
+image — set `--flank` to whatever context you want around each call.
+Records with no ALT allele (e.g. gVCF reference blocks) are skipped.
+
+`--report` (optionally `--report NAME.html`) additionally writes one
+self-contained HTML file with every rendered image embedded inline, alongside
+a summary table of reads/gapped%/discordant%/soft-clipped per region — useful
+for reviewing a panel of candidate variants without opening each PNG. It
+requires `--batch_regions` and a browser-viewable `--output_format` (png,
+jpg, jpeg, webp, or svg — not pdf/tiff/svgz).
+
+`--batch_regions` currently supports one `--bam` at a time and does not
+combine with `--sort_base_position` or `--metrics_tsv`.
+
 ## Add genomic tracks
 
 The short form is enough when the filename identifies the format:
@@ -418,12 +480,38 @@ Quote the entire value so `#` is not treated as a shell comment.
 | VCF | SNVs and structural variants | burgundy variant intervals |
 | narrowPeak/broadPeak | ChIP-seq, ATAC-seq, DNase-seq | filled signal peaks |
 | signal | normalized ChIP/ATAC/DNase pileup | continuous filled profile |
+| BigWig | the same, distributed as an indexed binary file | continuous filled profile |
 | SEG | segmented copy number | gain/loss log2 track |
 | bedGraph/log2/CNV | binned or segmented log2 ratios | signed zero-centered track |
 
 The accepted custom `TYPE` values are `bed`, `gff`, `gff3`, `gtf`, `vcf`,
-`narrowpeak`, `broadpeak`, `peak`, `signal`, `seg`, `bedgraph`, `log2`, `cnv`,
-and `auto`.
+`narrowpeak`, `broadpeak`, `peak`, `signal`, `bigwig` (alias `bw`), `seg`,
+`bedgraph`, `log2`, `cnv`, and `auto`.
+
+### BigWig tracks
+
+A `.bw`/`.bigWig` file (the format most ChIP-seq/ATAC-seq/RNA-seq coverage
+tracks, e.g. from deepTools or the UCSC/ENCODE archives, are already
+distributed as) works with either track form:
+
+```bash
+locus-snap \
+  --bam sample.bam \
+  --region chr9:101867492-101867612 \
+  --track coverage.bw \
+  --track_label "Input signal" \
+  --output_name bigwig-track
+```
+
+BigWig is self-indexed, so no separate `.tbi`/`.csi` file is needed. By
+default it loads as a `signal` track (continuous, non-negative, scaled by
+`styles.signal_y_max` like any other signal track — see "Configure
+everything with YAML"). For signed BigWig data (e.g. a log2 ratio track),
+override the type explicitly:
+
+```bash
+--custom_track 'ratio.bw,log2,Log2 ratio,#2878b5'
+```
 
 Use `--track_display` to control annotation density:
 
@@ -446,7 +534,9 @@ for example `TGFBR1 · NM_004612.4`; collapsed models show the gene name only.
 
 Plain-text tracks work directly. A `.gz`, `.bgz`, or `.bgzf` track must be
 BGZF-compressed and have a `.tbi` or `.csi` index. It is fetched by region with
-tabix; ordinary gzip is not enough.
+tabix; ordinary gzip is not enough. BigWig (`.bw`/`.bigWig`) is a binary,
+self-indexed format and is exempt from this — never gzip it, and no separate
+index file is needed.
 
 ```bash
 bgzip genes.gtf
@@ -638,8 +728,10 @@ CIGAR insertion and deletion lengths are hidden by default. Show them with
 
 | Option | Purpose |
 |---|---|
-| `--bam BAM` | indexed input; repeat for multiple samples |
+| `--bam BAM` | indexed BAM or CRAM input; repeat for multiple samples |
 | `--region chr:start-end` | 1-based inclusive window |
+| `--batch_regions BED\|VCF` | render every region in a BED file, or every variant in a VCF (single BAM) |
+| `--report [NAME.html]` | self-contained HTML report for `--batch_regions` |
 | `--fasta FASTA` | reference bases, mismatches, and coverage VAF |
 | `--flank BP` | add context on both sides |
 | `--display_mode collapse\|expand\|squish` | read-track density |
@@ -717,8 +809,13 @@ event evidence rather than every read.
 ### “The BAM has no index”
 
 ```bash
-samtools index sample.bam
+samtools index sample.bam    # or samtools index sample.cram
 ```
+
+### CRAM fails to open or decode
+
+CRAM needs `--fasta` pointing at the same reference it was compressed
+against; a missing or mismatched reference is the most common cause.
 
 ### A compressed track will not load
 
@@ -753,3 +850,8 @@ overly restrictive `--only` filter.
 ```bash
 pytest -q
 ```
+
+A GitHub Actions workflow ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+runs the complete suite on every push and pull request against Python
+3.9–3.14, mirroring the [Tox](#test-supported-python-versions-with-tox)
+matrix above.
