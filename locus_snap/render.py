@@ -32,6 +32,7 @@ from locus_snap.config import (
     DEFAULT_CHROMOSOME_COLORS,
     DEFAULT_CHROMOSOME_PALETTE,
     DEFAULT_HAPLOTYPE_COLORS,
+    DEFAULT_TAG_COLORS,
     DEFAULT_VISUAL_COLORS,
     load_config,
 )
@@ -42,6 +43,7 @@ from locus_snap.reference import ReferenceWindow
 DEFAULT_COVERAGE_VAF_THRESHOLD = 0.20
 DEFAULT_MAX_REFERENCE_SPAN = 250
 MAX_EXPLICIT_MATE_CHROMOSOMES = 2
+MAX_EXPLICIT_TAG_VALUES = 8
 GRID_MODES = ("none", "major", "major_minor", "bands")
 TITLE_ALIGNMENTS = ("left", "center", "right")
 
@@ -152,13 +154,12 @@ def chrom_color(
     return palette[h % len(palette)]
 
 
-def haplotype_color(
-    haplotype: Optional[str], colors: Optional[Dict[str, str]] = None,
+def categorical_color(
+    category: Optional[str], colors: Dict[str, str],
     palette: Optional[List[str]] = None,
 ) -> str:
-    colors = colors or DEFAULT_HAPLOTYPE_COLORS
     palette = palette or DEFAULT_CHROMOSOME_PALETTE
-    label = str(haplotype) if haplotype is not None else "untagged"
+    label = str(category) if category is not None else "untagged"
     if label in colors:
         return colors[label]
     if label.isdigit():
@@ -167,6 +168,22 @@ def haplotype_color(
     for character in label:
         value = (value * 31 + ord(character)) & 0xFFFFFFFF
     return palette[value % len(palette)]
+
+
+def haplotype_color(
+    haplotype: Optional[str], colors: Optional[Dict[str, str]] = None,
+    palette: Optional[List[str]] = None,
+) -> str:
+    return categorical_color(
+        haplotype, colors or DEFAULT_HAPLOTYPE_COLORS, palette
+    )
+
+
+def tag_color(
+    value: Optional[str], colors: Optional[Dict[str, str]] = None,
+    palette: Optional[List[str]] = None,
+) -> str:
+    return categorical_color(value, colors or DEFAULT_TAG_COLORS, palette)
 
 
 def compute_coverage(reads: List[AlignedRead], start: int, end: int) -> List[int]:
@@ -459,6 +476,10 @@ class AlignmentRenderer:
         show_variant_counts: bool = False,
         show_indel_lengths: bool = False,
         haplotype_view: str = "none",
+        read_tag: Optional[str] = None,
+        tag_view: str = "none",
+        tag_label: Optional[str] = None,
+        tag_colors: Optional[Dict[str, str]] = None,
         visual_config: Optional[Dict[str, Any]] = None,
         sort_base_position: Optional[int] = None,
         sort_reference_base: Optional[str] = None,
@@ -476,6 +497,11 @@ class AlignmentRenderer:
         self.base_colors = dict(theme["base_colors"])
         self.visual_colors = dict(theme["visual_colors"])
         self.haplotype_colors = dict(theme["haplotype_colors"])
+        self.tag_colors = dict(theme["tag_colors"])
+        self.tag_colors.update(tag_colors or {})
+        for category, color in self.tag_colors.items():
+            if not is_color_like(color):
+                raise ValueError(f"Invalid color for tag value {category!r}: {color!r}.")
         self.cytoband_colors = dict(theme["cytoband_colors"])
         self.chromosome_colors = dict(theme["chromosome_colors"])
         self.chromosome_palette = list(theme["chromosome_palette"])
@@ -550,7 +576,19 @@ class AlignmentRenderer:
         self.show_indel_lengths = show_indel_lengths
         if haplotype_view not in ("none", "color", "split"):
             raise ValueError("Haplotype view must be none, color, or split.")
+        if tag_view not in ("none", "color", "split"):
+            raise ValueError("Tag view must be none, color, or split.")
+        if haplotype_view != "none" and tag_view != "none":
+            raise ValueError("Haplotype and generic tag views cannot be active together.")
+        if tag_view != "none" and not read_tag:
+            raise ValueError("Tag colour/group view requires a BAM tag name.")
         self.haplotype_view = haplotype_view
+        self.read_tag = read_tag
+        self.tag_view = tag_view
+        self.tag_label = tag_label or (f"Tag {read_tag}" if read_tag else "Tag")
+        self.tag_value_colors: Dict[str, str] = {}
+        self.tag_value_counts: Dict[str, int] = {}
+        self.has_split_lanes = haplotype_view == "split" or tag_view == "split"
         self.row_height_in = (
             self.styles["squish_row_height_in"] if display_mode == "squish"
             else self.styles["row_height_in"]
@@ -559,7 +597,7 @@ class AlignmentRenderer:
             self.styles["squish_row_margin"] if display_mode == "squish"
             else self.styles["row_margin"]
         )
-        if haplotype_view != "none":
+        if haplotype_view != "none" or tag_view != "none":
             legend_group_count = 4
         elif pair_colors:
             legend_group_count = 4
@@ -707,6 +745,14 @@ class AlignmentRenderer:
                 getattr(read, "haplotype", None), self.haplotype_colors,
                 self.chromosome_palette,
             )
+        elif self.tag_view in ("color", "split"):
+            raw_value = getattr(read, "tag_value", None)
+            label = str(raw_value) if raw_value is not None else "untagged"
+            color = tag_color(
+                raw_value, self.tag_colors, self.chromosome_palette,
+            )
+            self.tag_value_colors[label] = color
+            self.tag_value_counts[label] = self.tag_value_counts.get(label, 0) + 1
         elif self.pair_colors and read.pair_category == "interchrom":
             color = self.alignment_colors["interchrom"] or chrom_color(
                 read.mate_chrom, self.chromosome_palette,
@@ -918,7 +964,7 @@ class AlignmentRenderer:
 
         # --- legend -----------------------------------
         plot_left = left_margin_fraction(self.fig_width, genomic_tracks)
-        if self.haplotype_view == "split":
+        if self.has_split_lanes:
             plot_left = max(plot_left, min(1.15 / self.fig_width, 0.25))
         plot_right = 0.92
         fig.subplots_adjust(left=plot_left, right=plot_right,
@@ -1811,7 +1857,11 @@ class AlignmentRenderer:
         ]
         insert_size_handles = []
         pair_geometry_handles = []
-        if self.pair_colors and self.haplotype_view == "none":
+        if (
+            self.pair_colors
+            and self.haplotype_view == "none"
+            and self.tag_view == "none"
+        ):
             insert_size_handles = [
                 Patch(facecolor=self.alignment_colors["large_insert"], edgecolor="none", label=PAIR_CATEGORY_LABELS["large_insert"]),
                 Patch(facecolor=self.alignment_colors["small_insert"], edgecolor="none", label=PAIR_CATEGORY_LABELS["small_insert"]),
@@ -1860,6 +1910,34 @@ class AlignmentRenderer:
                 Patch(facecolor=haplotype_color("3", self.haplotype_colors, self.chromosome_palette), edgecolor="none", label="Other HP"),
                 Patch(facecolor=haplotype_color(None, self.haplotype_colors, self.chromosome_palette), edgecolor="none", label="Untagged"),
             ]
+        tag_handles = []
+        if self.tag_view in ("color", "split") and self.tag_value_colors:
+            labels = sorted(
+                self.tag_value_colors,
+                key=lambda label: (
+                    label == "untagged",
+                    0 if label.isdigit() else 1,
+                    int(label) if label.isdigit() else label,
+                ),
+            )
+            omitted_count = 0
+            if len(labels) > MAX_EXPLICIT_TAG_VALUES:
+                labels = sorted(
+                    labels,
+                    key=lambda label: (-self.tag_value_counts.get(label, 0), label),
+                )[:MAX_EXPLICIT_TAG_VALUES - 1]
+                omitted_count = len(self.tag_value_colors) - len(labels)
+            for label in labels:
+                display_label = "Untagged" if label == "untagged" else label
+                tag_handles.append(Patch(
+                    facecolor=self.tag_value_colors[label], edgecolor="none",
+                    label=f"{display_label} (n={self.tag_value_counts.get(label, 0)})",
+                ))
+            if omitted_count:
+                tag_handles.append(Patch(
+                    facecolor="none", edgecolor=self.visual_colors["axis"],
+                    label=f"{omitted_count} more values",
+                ))
         base_handles = []
         for base in "ACGT":
             base_handles.append(Patch(
@@ -1882,6 +1960,10 @@ class AlignmentRenderer:
         ]
         if haplotype_handles:
             groups.append(("Haplotype", haplotype_handles, 2, 1.35))
+        elif tag_handles:
+            tag_columns = 2 if len(tag_handles) > 1 else 1
+            tag_weight = 1.35 if len(tag_handles) <= 4 else 1.85
+            groups.append((self.tag_label, tag_handles, tag_columns, tag_weight))
         elif insert_size_handles:
             groups.append(("Insert size", insert_size_handles, 1, 1.05))
         groups.append(("Base identity", base_handles, 2, 1.00))
@@ -2184,7 +2266,7 @@ class AlignmentRenderer:
         for panel in panels:
             margin_tracks.extend(panel.get("companion_tracks", []))
         plot_left = left_margin_fraction(self.fig_width, margin_tracks)
-        if self.haplotype_view == "split":
+        if self.has_split_lanes:
             plot_left = max(plot_left, min(1.15 / self.fig_width, 0.25))
         plot_right = 0.92
         fig.subplots_adjust(left=plot_left, right=plot_right,
@@ -2287,7 +2369,7 @@ class AlignmentRenderer:
             figsize=(self.fig_width, fig_height), dpi=self.dpi,
             gridspec_kw={
                 "height_ratios": ratios, "hspace": 0.15,
-                "wspace": 0.20 if self.haplotype_view == "split" else 0.12,
+                "wspace": 0.20 if self.has_split_lanes else 0.12,
             },
         )
 
@@ -2433,7 +2515,7 @@ class AlignmentRenderer:
         for panel in panels:
             all_genomic_tracks.extend(panel.get("genomic_tracks", []))
         plot_left = left_margin_fraction(self.fig_width, all_genomic_tracks)
-        if self.haplotype_view == "split":
+        if self.has_split_lanes:
             plot_left = max(plot_left, min(1.15 / self.fig_width, 0.25))
         plot_right = 0.95
         fig.subplots_adjust(left=plot_left, right=plot_right,
@@ -2590,7 +2672,7 @@ class AlignmentRenderer:
             gridspec_kw={
                 "height_ratios": ratios,
                 "hspace": 0.16,
-                "wspace": 0.22 if self.haplotype_view == "split" else 0.13,
+                "wspace": 0.22 if self.has_split_lanes else 0.13,
             },
         )
 
@@ -2762,7 +2844,7 @@ class AlignmentRenderer:
             for sample in locus["samples"]:
                 all_tracks.extend(sample.get("companion_tracks", []))
         plot_left = left_margin_fraction(self.fig_width, all_tracks)
-        if self.haplotype_view == "split":
+        if self.has_split_lanes:
             plot_left = max(plot_left, min(1.15 / self.fig_width, 0.25))
         plot_right = 0.95
         fig.subplots_adjust(
@@ -2818,47 +2900,59 @@ class AlignmentRenderer:
         plt.close(fig)
 
     def draw_haplotype_lanes(self, ax, rows: List[List[AlignedRead]]) -> None:
-        """Shade and label contiguous HP lanes created by split layout mode."""
-        if self.haplotype_view != "split" or not rows:
+        """Shade and label contiguous HP or generic BAM-tag lanes."""
+        if not self.has_split_lanes or not rows:
             return
+        is_haplotype = self.haplotype_view == "split"
+        value_attribute = "haplotype" if is_haplotype else "tag_value"
         lanes = []
         lane_start = 0
-        lane_haplotype = getattr(rows[0][0], "haplotype", None) if rows[0] else None
+        lane_value = getattr(rows[0][0], value_attribute, None) if rows[0] else None
         for row_index, row in enumerate(rows[1:], start=1):
-            row_haplotype = getattr(row[0], "haplotype", None) if row else None
-            if row_haplotype != lane_haplotype:
-                lanes.append((lane_start, row_index, lane_haplotype))
+            row_value = getattr(row[0], value_attribute, None) if row else None
+            if row_value != lane_value:
+                lanes.append((lane_start, row_index, lane_value))
                 lane_start = row_index
-                lane_haplotype = row_haplotype
-        lanes.append((lane_start, len(rows), lane_haplotype))
+                lane_value = row_value
+        lanes.append((lane_start, len(rows), lane_value))
 
-        for index, (start, end, haplotype) in enumerate(lanes):
-            color = haplotype_color(
-                haplotype, self.haplotype_colors, self.chromosome_palette
-            )
+        for index, (start, end, value) in enumerate(lanes):
+            if is_haplotype:
+                color = haplotype_color(
+                    value, self.haplotype_colors, self.chromosome_palette
+                )
+            else:
+                color = tag_color(value, self.tag_colors, self.chromosome_palette)
             if index % 2 == 0:
                 ax.axhspan(
                     start, end, facecolor=color,
-                    alpha=self.styles["haplotype_lane_alpha"], zorder=0.2,
+                    alpha=self.styles[
+                        "haplotype_lane_alpha" if is_haplotype else "tag_lane_alpha"
+                    ], zorder=0.2,
                 )
             if start:
                 ax.axhline(
                     start, color=self.visual_colors["legend_edge"],
                     linewidth=0.7, zorder=1,
                 )
-            phase_set_values = set()
-            for row in rows[start:end]:
-                for read in row:
-                    if getattr(read, "phase_set", None) is not None:
-                        phase_set_values.add(str(read.phase_set))
-            phase_sets = sorted(phase_set_values)
-            label = f"HP {haplotype}" if haplotype is not None else "Untagged"
-            if len(phase_sets) == 1:
-                label += f" · PS {phase_sets[0]}"
-            elif len(phase_sets) > 1:
-                label += f" · {len(phase_sets)} PS"
+            if is_haplotype:
+                phase_set_values = set()
+                for row in rows[start:end]:
+                    for read in row:
+                        if getattr(read, "phase_set", None) is not None:
+                            phase_set_values.add(str(read.phase_set))
+                phase_sets = sorted(phase_set_values)
+                label = f"HP {value}" if value is not None else "Untagged"
+                if len(phase_sets) == 1:
+                    label += f" · PS {phase_sets[0]}"
+                elif len(phase_sets) > 1:
+                    label += f" · {len(phase_sets)} PS"
+            else:
+                display_value = str(value) if value is not None else "untagged"
+                lane_read_count = sum(len(row) for row in rows[start:end])
+                label = f"{self.tag_label}={display_value} (n={lane_read_count})"
             ax.text(
-                -0.012, (start + end) / 2, label,
+                -0.012, (start + end) / 2, ellipsize(label, 32),
                 transform=ax.get_yaxis_transform(), ha="right", va="center",
                 fontsize=6.5, color=color, fontweight="bold", clip_on=False,
             )

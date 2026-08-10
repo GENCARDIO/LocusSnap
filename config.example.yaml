@@ -47,6 +47,12 @@ preferences:
   haplotype_view: none
   haplotype_tag: HP
   phase_set_tag: PS
+  # Generic scalar SAM tags can colour reads or split them into lanes.
+  # group_by_tag: RG
+  # color_by_tag: CB
+  # tag_filter: [Library_A, Library_B, untagged]
+  # tag_label: Library
+  # tag_color: ["Library_A=#377eb8", "Library_B=#e6862d"]
   view_as_pairs: false
   center_guide: false
   sashimi: false
@@ -153,6 +159,13 @@ haplotype_colors:
   "2": "#e6862d"
   untagged: "#9b9b96"
 
+# Default and named colours for arbitrary --group_by_tag/--color_by_tag values.
+# Unknown values use the deterministic chromosome_palette below.
+tag_colors:
+  untagged: "#9b9b96"
+  # Library_A: "#377eb8"
+  # Library_B: "#e6862d"
+
 cytoband_colors:
   gneg: "#ffffff"
   gpos25: "#c8c8c8"
@@ -209,6 +222,7 @@ styles:
   signal_fill_alpha: 0.82
   density_fill_alpha: 0.45
   haplotype_lane_alpha: 0.055
+  tag_lane_alpha: 0.055
   # Reads have no rectangular border by default.
   alignment_edge_width: 0.00
   squish_alignment_edge_width: 0.00

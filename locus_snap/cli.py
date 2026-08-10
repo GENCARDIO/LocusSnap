@@ -19,6 +19,8 @@ import re
 import sys
 from concurrent.futures import ProcessPoolExecutor
 
+from matplotlib.colors import is_color_like
+
 from locus_snap.annotations import (
     ANNOTATION_DISPLAY_MODES,
     PRIMARY_ISOFORM_MODES,
@@ -82,6 +84,28 @@ def parse_region(region: str, flank: int = 0, option: str = "--region"):
     start0 = max(0, start - 1 - flank)
     end0 = end + flank
     return chrom, start0, end0
+
+
+def parse_tag_colors(specifications) -> dict:
+    """Parse repeatable VALUE=COLOR overrides for generic BAM-tag values."""
+    colors = {}
+    for specification in specifications or []:
+        if "=" not in specification:
+            raise ValueError(
+                f"Invalid --tag_color {specification!r}; expected VALUE=COLOR."
+            )
+        value, color = specification.split("=", 1)
+        value = value.strip()
+        color = color.strip()
+        if not value or not color or not is_color_like(color):
+            raise ValueError(
+                f"Invalid --tag_color {specification!r}; expected VALUE=COLOR "
+                "with a valid Matplotlib colour."
+            )
+        if value.lower() == "untagged":
+            value = "untagged"
+        colors[value] = color
+    return colors
 
 
 def _render_batch_region(task: dict) -> BatchResult:
@@ -359,6 +383,32 @@ def build_parser() -> argparse.ArgumentParser:
     haplotype_group.add_argument(
         "--phase_set_tag", default="PS", metavar="TAG",
         help="Two-character SAM tag containing the phase-set identifier.",
+    )
+    tag_group = parser.add_argument_group("BAM-tag grouping and colouring")
+    tag_mode = tag_group.add_mutually_exclusive_group()
+    tag_mode.add_argument(
+        "--group_by_tag", metavar="TAG",
+        help=("Separate reads into labelled lanes by a two-character SAM tag and "
+              "colour each tag value deterministically."),
+    )
+    tag_mode.add_argument(
+        "--color_by_tag", metavar="TAG",
+        help=("Colour reads by a two-character SAM tag without changing their "
+              "row layout."),
+    )
+    tag_group.add_argument(
+        "--tag_filter", nargs="+", metavar="VALUE",
+        help=("Keep selected values of --group_by_tag/--color_by_tag; use "
+              "'untagged' for reads without the tag."),
+    )
+    tag_group.add_argument(
+        "--tag_color", action="append", metavar="VALUE=COLOR",
+        help=("Override the colour for one tag value; repeat as needed. COLOR accepts "
+              "any Matplotlib colour, such as '#377eb8'."),
+    )
+    tag_group.add_argument(
+        "--tag_label", metavar="LABEL",
+        help="Human-readable lane and legend title; defaults to 'Tag TAG'.",
     )
     parser.add_argument(
         "--sort_by", choices=sorted(SORT_KEYS), default="gap_length",
@@ -688,7 +738,24 @@ def main(argv=None) -> int:
     if args.min_baseq < 0 or args.min_variant_mapq < 0:
         log.error("--min_baseq and --min_variant_mapq cannot be negative.")
         return 1
-    for option, tag in (("--haplotype_tag", args.haplotype_tag), ("--phase_set_tag", args.phase_set_tag)):
+    if args.group_by_tag and args.color_by_tag:
+        log.error("--group_by_tag and --color_by_tag are mutually exclusive.")
+        return 1
+    read_tag = args.group_by_tag or args.color_by_tag
+    tag_view = "split" if args.group_by_tag else ("color" if args.color_by_tag else "none")
+    if read_tag and args.haplotype_view != "none":
+        log.error("Generic BAM-tag colouring/grouping cannot be combined with --haplotype_view.")
+        return 1
+    if not read_tag and (args.tag_filter or args.tag_color or args.tag_label):
+        log.error("--tag_filter, --tag_color, and --tag_label require --group_by_tag or --color_by_tag.")
+        return 1
+    tag_options = [
+        ("--haplotype_tag", args.haplotype_tag),
+        ("--phase_set_tag", args.phase_set_tag),
+    ]
+    if read_tag:
+        tag_options.append(("--group_by_tag/--color_by_tag", read_tag))
+    for option, tag in tag_options:
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]", tag):
             log.error("%s must be a two-character SAM tag.", option)
             return 1
@@ -696,6 +763,14 @@ def main(argv=None) -> int:
     haplotype_filter = []
     for value in args.haplotype_filter or []:
         haplotype_filter.append("untagged" if value.lower() == "untagged" else value)
+    tag_filter = []
+    for value in args.tag_filter or []:
+        tag_filter.append("untagged" if value.lower() == "untagged" else value)
+    try:
+        tag_colors = parse_tag_colors(args.tag_color)
+    except ValueError as exc:
+        log.error(str(exc))
+        return 1
 
     alignment_colors = visual_config["alignment_colors"]
 
@@ -805,6 +880,11 @@ def main(argv=None) -> int:
         haplotype_filter=haplotype_filter,
         haplotype_tag=args.haplotype_tag,
         phase_set_tag=args.phase_set_tag,
+        read_tag=read_tag,
+        tag_view=tag_view,
+        tag_filter=tag_filter,
+        tag_label=args.tag_label,
+        tag_colors=tag_colors,
         annotate_gap=not args.no_annotate,
         show_indel_lengths=args.show_indel_lengths,
         fig_width=args.fig_width,

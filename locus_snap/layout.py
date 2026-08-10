@@ -55,6 +55,16 @@ BASE_SORT_ORDER = {"N": 0, "A": 1, "C": 2, "G": 3, "T": 4}
 
 DISPLAY_MODES = ("collapse", "expand", "squish")
 HAPLOTYPE_VIEWS = ("none", "color", "split")
+TAG_VIEWS = ("none", "color", "split")
+
+
+def category_label_key(label):
+    """Order numeric labels naturally, text labels lexically, and untagged last."""
+    if label is None:
+        return 2, ""
+    if str(label).isdigit():
+        return 0, int(label)
+    return 1, str(label)
 
 
 def resolve_sort_key(name: str) -> SortKeyFunc:
@@ -238,6 +248,7 @@ def build_rows(
     display_mode: str = "expand",
     view_as_pairs: bool = False,
     haplotype_view: str = "none",
+    tag_view: str = "none",
     base_position: Optional[int] = None, reference_base: Optional[str] = None,
 ) -> List[List[AlignedRead]]:
     if display_mode not in DISPLAY_MODES:
@@ -249,19 +260,23 @@ def build_rows(
             f"Unknown haplotype view '{haplotype_view}'. Choose from: "
             f"{', '.join(HAPLOTYPE_VIEWS)}."
         )
+    if tag_view not in TAG_VIEWS:
+        raise ValueError(
+            f"Unknown tag view '{tag_view}'. Choose from: {', '.join(TAG_VIEWS)}."
+        )
+    if haplotype_view != "none" and tag_view != "none":
+        raise ValueError("Haplotype and generic tag views cannot be active together.")
+    split_attribute = None
     if haplotype_view == "split":
+        split_attribute = "haplotype"
+    elif tag_view == "split":
+        split_attribute = "tag_value"
+    if split_attribute:
         grouped_reads = {}
         for read in reads:
-            grouped_reads.setdefault(getattr(read, "haplotype", None), []).append(read)
+            grouped_reads.setdefault(getattr(read, split_attribute, None), []).append(read)
 
-        def haplotype_label_key(label):
-            if label is None:
-                return 2, ""
-            if str(label).isdigit():
-                return 0, int(label)
-            return 1, str(label)
-
-        labels = sorted(grouped_reads, key=haplotype_label_key)
+        labels = sorted(grouped_reads, key=category_label_key)
         rows = []
         for label in labels:
             rows.extend(build_rows(
@@ -269,6 +284,7 @@ def build_rows(
                 descending=descending, padding=padding,
                 display_mode=display_mode, view_as_pairs=view_as_pairs,
                 haplotype_view="none",
+                tag_view="none",
                 base_position=base_position, reference_base=reference_base,
             ))
         return rows
