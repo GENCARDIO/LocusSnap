@@ -17,7 +17,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import is_color_like
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch, PathPatch, Polygon, Rectangle
+from matplotlib.patches import ConnectionPatch, Patch, PathPatch, Polygon, Rectangle
 from matplotlib.path import Path
 from matplotlib.ticker import MaxNLocator
 
@@ -2453,6 +2453,367 @@ class AlignmentRenderer:
             for row in axes:
                 plot_axes.extend(row)
             self.separate_legend_from_plots(fig, plot_axes, legends)
+        fig.savefig(out_path, dpi=self.dpi)
+        plt.close(fig)
+
+    def render_multi_loci(
+        self,
+        loci: List[dict],
+        out_path: str,
+        suptitle: str = "",
+        assembly_label: Optional[str] = None,
+        link_breakpoints: bool = False,
+    ) -> None:
+        """Render independently scaled loci as columns and samples as rows.
+
+        Each locus supplies its own chromosome, bounds, reference, annotations,
+        and a ``samples`` list.  Sample order must be identical across loci.
+        This extends mate view into an explicit multi-locus layout while also
+        supporting repeated BAM inputs.
+        """
+        if len(loci) < 2:
+            raise ValueError("Multi-locus view requires at least two loci.")
+        sample_count = len(loci[0].get("samples", []))
+        if sample_count < 1:
+            raise ValueError("Multi-locus view requires at least one sample panel.")
+        if any(len(locus.get("samples", [])) != sample_count for locus in loci):
+            raise ValueError("Every locus must contain the same number of sample panels.")
+
+        show_ref_track = any(
+            locus.get("reference") and locus["reference"].available and
+            self.max_reference_span > 0 and
+            locus["end"] - locus["start"] <= self.max_reference_span
+            for locus in loci
+        )
+        show_ideogram = self.show_ideogram and any(
+            locus.get("contig_length") for locus in loci
+        )
+
+        tracks = ["locus_header"]
+        ratios = [self.styles["panel_header_height_in"]]
+        if show_ideogram:
+            tracks.append("ideogram")
+            ratios.append(self.styles["ideogram_height_in"])
+        if show_ref_track:
+            tracks.append("reference")
+            ratios.append(self.styles["reference_height_in"])
+
+        annotation_count = max(
+            (len(locus.get("genomic_tracks", [])) for locus in loci), default=0
+        )
+        annotation_row_counts = []
+        for annotation_index in range(annotation_count):
+            shared_rows = max(
+                (
+                    len(locus["genomic_tracks"][annotation_index].rows)
+                    for locus in loci
+                    if annotation_index < len(locus.get("genomic_tracks", []))
+                ),
+                default=1,
+            )
+            annotation_row_counts.append(max(shared_rows, 1))
+            tracks.append(f"annotation_{annotation_index}")
+            ratios.append(max(
+                (
+                    self.annotation_track_height(
+                        locus["genomic_tracks"][annotation_index],
+                        row_count=max(shared_rows, 1),
+                    )
+                    for locus in loci
+                    if annotation_index < len(locus.get("genomic_tracks", []))
+                ),
+                default=self.styles["annotation_row_height_in"],
+            ))
+
+        sample_track_names = []
+        for sample_index in range(sample_count):
+            header_name = f"sample_header_{sample_index}"
+            tracks.append(header_name)
+            ratios.append(self.styles["panel_header_height_in"])
+
+            companion_count = max(
+                (
+                    len(locus["samples"][sample_index].get("companion_tracks", []))
+                    for locus in loci
+                ),
+                default=0,
+            )
+            companion_names = []
+            for companion_index in range(companion_count):
+                name = f"companion_{sample_index}_{companion_index}"
+                companion_names.append(name)
+                tracks.append(name)
+                ratios.append(max(
+                    (
+                        self.annotation_track_height(
+                            locus["samples"][sample_index]["companion_tracks"][companion_index]
+                        )
+                        for locus in loci
+                        if companion_index < len(
+                            locus["samples"][sample_index].get("companion_tracks", [])
+                        )
+                    ),
+                    default=self.styles["annotation_row_height_in"],
+                ))
+
+            coverage_name = f"coverage_{sample_index}"
+            sashimi_name = f"sashimi_{sample_index}"
+            alignment_name = f"alignments_{sample_index}"
+            if self.show_coverage:
+                tracks.append(coverage_name)
+                ratios.append(self.styles["coverage_track_height_in"])
+            if self.show_sashimi:
+                tracks.append(sashimi_name)
+                ratios.append(self.styles["sashimi_track_height_in"])
+            if self.show_alignments:
+                tracks.append(alignment_name)
+                maximum_rows = max(
+                    len(locus["samples"][sample_index]["rows"])
+                    for locus in loci
+                )
+                ratios.append(max(maximum_rows * self.row_height_in, self.row_height_in))
+            sample_track_names.append({
+                "header": header_name,
+                "companions": companion_names,
+                "coverage": coverage_name,
+                "sashimi": sashimi_name,
+                "alignments": alignment_name,
+            })
+
+        top_margin_in = 0.58
+        bottom_margin_in = self.legend_margin_in
+        fig_height = sum(ratios) + top_margin_in + bottom_margin_in
+        column_count = len(loci)
+        fig, axes = plt.subplots(
+            nrows=len(tracks), ncols=column_count, squeeze=False,
+            figsize=(self.fig_width, fig_height), dpi=self.dpi,
+            gridspec_kw={
+                "height_ratios": ratios,
+                "hspace": 0.16,
+                "wspace": 0.22 if self.haplotype_view == "split" else 0.13,
+            },
+        )
+
+        if suptitle:
+            title_x, title_ha = self.figure_title_position()
+            fig.text(
+                title_x, 0.995, suptitle, fontsize=10.5,
+                color=self.visual_colors["primary_text"], fontweight="bold",
+                va="top", ha=title_ha,
+            )
+
+        for locus_index, locus in enumerate(loci):
+            chrom = locus["chrom"]
+            start = locus["start"]
+            end = locus["end"]
+            span = end - start
+            reference = locus.get("reference")
+            ticks = nice_tick_positions(start, end, target=max(3, 6 - column_count))
+            axes_by_track = {
+                track: axes[track_index][locus_index]
+                for track_index, track in enumerate(tracks)
+            }
+            for ax in axes_by_track.values():
+                ax.set_xlim(start, end)
+                for spine in ("top", "right", "left"):
+                    ax.spines[spine].set_visible(False)
+                ax.spines["bottom"].set_visible(False)
+                ax.tick_params(
+                    left=False, labelleft=False, bottom=False, top=False,
+                    labelbottom=False, labeltop=False,
+                )
+
+            header_ax = axes_by_track["locus_header"]
+            header_ax.set_ylim(0, 1)
+            header_ax.text(
+                0.0, 0.72,
+                ellipsize(locus.get("label", f"Locus {locus_index + 1}"),
+                          max(12, int(self.fig_width * 13 / column_count))),
+                transform=header_ax.transAxes, ha="left", va="center",
+                fontsize=8.4, color=self.visual_colors["primary_text"],
+                fontweight="bold", clip_on=True,
+            )
+            header_ax.text(
+                0.0, 0.16, f"{chrom}:{start + 1:,}-{end:,} ({span:,} bp)",
+                transform=header_ax.transAxes, ha="left", va="center",
+                fontsize=7, color=self.visual_colors["secondary_text"], clip_on=True,
+            )
+
+            for track, ax in axes_by_track.items():
+                if track not in ("locus_header", "ideogram") and not track.startswith("sample_header_"):
+                    self.draw_background_grid(ax, ticks, start, end)
+                    self.draw_highlights(ax, chrom, start, end)
+
+            if show_ideogram and locus.get("contig_length"):
+                self.draw_ideogram(
+                    axes_by_track["ideogram"], chrom, start, end,
+                    locus["contig_length"], locus.get("cytobands"),
+                )
+            if show_ref_track:
+                reference_ax = axes_by_track["reference"]
+                reference_ax.set_ylim(0, 1)
+                if (
+                    reference and reference.available and self.max_reference_span > 0
+                    and span <= self.max_reference_span
+                ):
+                    self.draw_reference_track(
+                        reference_ax, reference, start, end,
+                        available_width_in=self.fig_width / column_count,
+                    )
+
+            for annotation_index, annotation in enumerate(locus.get("genomic_tracks", [])):
+                self.draw_annotation_track(
+                    axes_by_track[f"annotation_{annotation_index}"], annotation,
+                    start, end, shared_row_count=annotation_row_counts[annotation_index],
+                )
+
+            for sample_index, sample in enumerate(locus["samples"]):
+                names = sample_track_names[sample_index]
+                rows = sample["rows"]
+                layout = sample.get("layout", "pack")
+                self.active_sort_base_position = sample.get(
+                    "sort_base_position", self.sort_base_position
+                )
+                self.active_sort_reference_base = sample.get(
+                    "sort_reference_base", self.sort_reference_base
+                )
+                render_base_detail = span <= self.max_mismatch_render_span
+
+                sample_label = sample.get("label", f"Sample {sample_index + 1}")
+                if sample.get("downsampled_reads"):
+                    sample_label += f"; {sample['downsampled_reads']} downsampled"
+                if sample.get("dropped_reads"):
+                    sample_label += f"; {sample['dropped_reads']} omitted"
+                sample_header = axes_by_track[names["header"]]
+                sample_header.set_ylim(0, 1)
+                sample_header.text(
+                    0.0, 0.45,
+                    ellipsize(sample_label, max(14, int(self.fig_width * 13 / column_count))),
+                    transform=sample_header.transAxes, ha="left", va="center",
+                    fontsize=8.2, color=self.visual_colors["primary_text"],
+                    fontweight="bold", clip_on=True,
+                )
+
+                for companion_index, annotation in enumerate(sample.get("companion_tracks", [])):
+                    self.draw_annotation_track(
+                        axes_by_track[names["companions"][companion_index]],
+                        annotation, start, end,
+                    )
+
+                if self.show_coverage:
+                    coverage_reads = sample.get("all_reads_for_coverage")
+                    if coverage_reads is None:
+                        coverage_reads = [read for row in rows for read in row]
+                    self.draw_coverage_track(
+                        axes_by_track[names["coverage"]], coverage_reads, start, end
+                    )
+                if self.show_sashimi:
+                    sashimi_reads = sample.get("all_reads_for_coverage")
+                    if sashimi_reads is None:
+                        sashimi_reads = [read for row in rows for read in row]
+                    self.draw_sashimi_track(
+                        axes_by_track[names["sashimi"]], sashimi_reads, start, end
+                    )
+                if self.show_alignments:
+                    alignment_ax = axes_by_track[names["alignments"]]
+                    maximum_rows = max(
+                        len(other_locus["samples"][sample_index]["rows"])
+                        for other_locus in loci
+                    )
+                    alignment_ax.set_ylim(max(maximum_rows, 1), 0)
+                    self.draw_haplotype_lanes(alignment_ax, rows)
+                    for row_index, row in enumerate(rows):
+                        self.draw_alignment_row(
+                            alignment_ax, row, row_index + self.row_margin,
+                            1 - 2 * self.row_margin, render_base_detail, layout,
+                        )
+                    if not rows:
+                        alignment_ax.text(
+                            0.5, 0.5, "No alignments in this region",
+                            transform=alignment_ax.transAxes, ha="center", va="center",
+                            fontsize=8, color=self.visual_colors["secondary_text"],
+                        )
+
+            for track, ax in axes_by_track.items():
+                if track not in ("locus_header", "ideogram") and not track.startswith("sample_header_"):
+                    self.draw_center_guide(ax, start, end)
+
+            if self.show_alignments:
+                axis_track = sample_track_names[-1]["alignments"]
+            elif self.show_coverage:
+                axis_track = sample_track_names[-1]["coverage"]
+            elif annotation_count:
+                axis_track = f"annotation_{annotation_count - 1}"
+            else:
+                axis_track = "reference" if show_ref_track else "locus_header"
+            axis_ax = axes_by_track[axis_track]
+            apply_genomic_axis(
+                axis_ax, ticks, start, end, label_size=8,
+                color=self.visual_colors["primary_text"],
+            )
+            axis_ax.tick_params(
+                bottom=True, labelbottom=True, labelsize=8, length=3,
+                colors=self.visual_colors["primary_text"],
+            )
+
+        all_tracks = []
+        for locus in loci:
+            all_tracks.extend(locus.get("genomic_tracks", []))
+            for sample in locus["samples"]:
+                all_tracks.extend(sample.get("companion_tracks", []))
+        plot_left = left_margin_fraction(self.fig_width, all_tracks)
+        if self.haplotype_view == "split":
+            plot_left = max(plot_left, min(1.15 / self.fig_width, 0.25))
+        plot_right = 0.95
+        fig.subplots_adjust(
+            left=plot_left, right=plot_right,
+            top=1 - top_margin_in / fig_height,
+            bottom=bottom_margin_in / fig_height,
+        )
+
+        for locus_index, locus in enumerate(loci):
+            panel_bounds = axes[0][locus_index].get_position()
+            self.draw_scale_bar(
+                fig, fig_height, panel_bounds.x0, panel_bounds.x1,
+                locus["end"] - locus["start"],
+                assembly_label if locus_index == len(loci) - 1 else None,
+                offset_from_top_in=0.46,
+            )
+
+        if link_breakpoints:
+            link_color = self.visual_colors["breakpoint_link"]
+            link_alpha = self.styles["breakpoint_link_alpha"]
+            marker_size = self.styles["breakpoint_link_marker_size"]
+            for locus_index in range(len(loci) - 1):
+                left_header = axes[0][locus_index]
+                right_header = axes[0][locus_index + 1]
+                connector = ConnectionPatch(
+                    xyA=(0.5, 1.02), coordsA=left_header.transAxes,
+                    xyB=(0.5, 1.02), coordsB=right_header.transAxes,
+                    axesA=left_header, axesB=right_header,
+                    arrowstyle="-", connectionstyle="arc3,rad=-0.08",
+                    color=link_color,
+                    linewidth=self.styles["breakpoint_link_width"],
+                    linestyle=self.styles["breakpoint_link_line_style"],
+                    alpha=link_alpha, zorder=30, clip_on=False,
+                )
+                fig.add_artist(connector)
+                left_header.plot(
+                    0.5, 1.02, marker="o", markersize=marker_size,
+                    color=link_color, alpha=link_alpha,
+                    transform=left_header.transAxes, clip_on=False, zorder=31,
+                )
+                right_header.plot(
+                    0.5, 1.02, marker="o", markersize=marker_size,
+                    color=link_color, alpha=link_alpha,
+                    transform=right_header.transAxes, clip_on=False, zorder=31,
+                )
+
+        if self.show_legend and self.show_alignments:
+            legends = self.draw_legends(fig, fig_height, plot_left, plot_right)
+            self.separate_legend_from_plots(
+                fig, [ax for row in axes for ax in row], legends
+            )
         fig.savefig(out_path, dpi=self.dpi)
         plt.close(fig)
 

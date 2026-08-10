@@ -54,6 +54,7 @@ DEFAULT_VISUAL_COLORS = {
     "ideogram_window": "#d62728",
     "centromere": "#b84b4b",
     "center_guide": "#52514e",
+    "breakpoint_link": "#7a1f5c",
     "cnv_gain": "#d73027",
     "cnv_loss": "#2878b5",
     "sashimi_combined": "#24557f",
@@ -154,6 +155,10 @@ DEFAULT_STYLES = {
     "center_guide_alpha": 0.65,
     "center_guide_width": 0.80,
     "center_guide_line_style": "--",
+    "breakpoint_link_alpha": 0.75,
+    "breakpoint_link_width": 1.10,
+    "breakpoint_link_marker_size": 3.80,
+    "breakpoint_link_line_style": "--",
     "legend_font_size": 6.80,
     "legend_title_size": 7.30,
     "legend_compartment_gap": 0.010,
@@ -189,11 +194,13 @@ ALPHA_STYLE_KEYS = {
     "peak_fill_alpha", "signal_fill_alpha", "density_fill_alpha",
     "haplotype_lane_alpha",
     "center_guide_alpha",
+    "breakpoint_link_alpha",
     "grid_line_alpha", "minor_grid_line_alpha", "grid_band_alpha",
     "sashimi_arc_alpha",
 }
 STRING_STYLE_CHOICES = {
     "center_guide_line_style": ("-", "--", ":", "-."),
+    "breakpoint_link_line_style": ("-", "--", ":", "-."),
     "grid_line_style": ("-", "--", ":", "-."),
     "minor_grid_line_style": ("-", "--", ":", "-."),
 }

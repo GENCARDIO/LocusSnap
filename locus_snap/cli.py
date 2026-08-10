@@ -43,7 +43,12 @@ from locus_snap.render import (
     DEFAULT_MAX_REFERENCE_SPAN,
     HighlightRegion,
 )
-from locus_snap.snapshot import OUTPUT_FORMATS, BamSnapshot, compare_snapshots
+from locus_snap.snapshot import (
+    OUTPUT_FORMATS,
+    BamSnapshot,
+    compare_snapshots,
+    render_multi_locus_snapshots,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger("locus_snap")
@@ -156,7 +161,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Legacy second BAM option; equivalent to repeating --bam.",
     )
     region_group = parser.add_mutually_exclusive_group(required=True)
-    region_group.add_argument("--region", help="Region as chrom:start-end (1-based, inclusive).")
+    region_group.add_argument(
+        "--region", action="append",
+        help=("Region as chrom:start-end (1-based, inclusive); repeat two or more "
+              "times for independently scaled multi-locus columns."),
+    )
     region_group.add_argument(
         "--batch_regions", metavar="BED_OR_VCF",
         help=("BED3/BED4 file, or a VCF/VCF.gz/BCF (one region per record, chosen by file "
@@ -185,6 +194,16 @@ def build_parser() -> argparse.ArgumentParser:
               "this span; set to 0 to hide the track while retaining mismatch detection."),
     )
     parser.add_argument("--flank", type=int, default=0, help="Extra bp of context padded on each side of --region.")
+    parser.add_argument(
+        "--region_label", action="append", metavar="LABEL",
+        help=("Label for the corresponding repeated --region; unspecified labels "
+              "default to Locus 1, Locus 2, and so on."),
+    )
+    parser.add_argument(
+        "--link_breakpoints", action="store_true",
+        help=("Connect the centres of adjacent explicit --region panels with a "
+              "breakpoint-link arc; requires at least two --region values."),
+    )
     parser.add_argument(
         "--highlight", action="append", metavar="REGION",
         help=("Shade a 1-based inclusive chrom:start-end interval through every data "
@@ -579,8 +598,11 @@ def main(argv=None) -> int:
         return 1
 
     try:
-        if args.region:
-            chrom, start, end = parse_region(args.region, flank=args.flank)
+        parsed_regions = [
+            parse_region(value, flank=args.flank) for value in args.region or []
+        ]
+        if parsed_regions:
+            chrom, start, end = parsed_regions[0]
         else:
             chrom = start = end = None
         highlight_regions = []
@@ -595,11 +617,31 @@ def main(argv=None) -> int:
         log.error(str(exc))
         return 1
 
+    if args.region_label and len(parsed_regions) < 2:
+        log.error("--region_label requires at least two --region values.")
+        return 1
+    if len(args.region_label or []) > len(parsed_regions):
+        log.error("More --region_label values were supplied than --region values.")
+        return 1
+    if args.link_breakpoints and len(parsed_regions) < 2:
+        log.error("--link_breakpoints requires at least two --region values.")
+        return 1
+    if len(parsed_regions) > 1 and args.mate_view:
+        log.error("--mate_view cannot be combined with repeated --region panels.")
+        return 1
+    if len(parsed_regions) > 1 and (args.metrics_tsv or args.metrics_tsv2):
+        log.error("--metrics_tsv/--metrics_tsv2 are not supported with repeated --region panels yet.")
+        return 1
     if args.mate_view and len(bam_paths) > 1:
         log.error("--mate_view cannot be combined with multiple BAM panels.")
         return 1
-    if args.no_alignments and (args.mate_view or len(bam_paths) > 1):
-        log.error("--no_alignments currently supports single-locus, single-BAM figures only.")
+    if args.no_alignments and (
+        args.mate_view or (len(bam_paths) > 1 and len(parsed_regions) <= 1)
+    ):
+        log.error(
+            "--no_alignments cannot yet be combined with mate view or "
+            "single-locus multi-BAM figures."
+        )
         return 1
     if args.mate_window_size is not None and args.mate_window_size <= 0:
         log.error("--mate_window_size must be greater than zero.")
@@ -629,6 +671,12 @@ def main(argv=None) -> int:
             return 1
         if args.sort_by != "base":
             log.error("--sort_base_position requires --sort_by base.")
+            return 1
+        if len(parsed_regions) > 1:
+            log.error(
+                "--sort_base_position cannot be combined with repeated --region panels; "
+                "without it, each locus sorts around its own centre."
+            )
             return 1
         sort_base_position = args.sort_base_position - 1
         if not start <= sort_base_position < end:
@@ -858,6 +906,29 @@ def main(argv=None) -> int:
             log.info("Wrote batch report: %s", report_path)
 
         return 1 if n_failed else 0
+
+    if len(parsed_regions) > 1:
+        try:
+            out_path, table = render_multi_locus_snapshots(
+                bam_paths=bam_paths,
+                regions=parsed_regions,
+                fasta=args.fasta,
+                output_dir=args.output_dir,
+                output_name=args.output_name,
+                output_format=args.output_format,
+                sample_labels=sample_labels,
+                region_labels=args.region_label,
+                companion_vcfs=companion_vcfs,
+                show_alignments=not args.no_alignments,
+                link_breakpoints=args.link_breakpoints,
+                **common_kwargs,
+            )
+        except (OSError, ValueError) as exc:
+            log.error(str(exc))
+            return 1
+        log.info("Wrote explicit multi-locus snapshot: %s", out_path)
+        print(table)
+        return 0
 
     if len(bam_paths) > 1:
         try:

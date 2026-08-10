@@ -190,6 +190,32 @@ python3 -m locus_snap \
 
 python3 -m locus_snap \
   --bam out/demo_data/alignments/demo_structural_variants.bam \
+  --sample_label 'Tumour · reciprocal translocation evidence' \
+  --region chr1:7351-7850 \
+  --region chr2:4751-5250 \
+  --region_label 'chr1 breakpoint · BND partner chr2' \
+  --region_label 'chr2 breakpoint · BND partner chr1' \
+  --link_breakpoints \
+  --custom_track 'out/demo_data/variants/demo_structural_variants.vcf.gz,vcf,Somatic BND,#7a1f5c,collapse,0.34' \
+  --only discordant split softclip \
+  --min_softclip 20 \
+  --view_as_pairs \
+  --layout pack \
+  --display_mode squish \
+  --sort_by gap_length \
+  --sort_order desc \
+  --max_rows 40 \
+  --max_alignment_depth 100 \
+  --no_annotate \
+  --genome none \
+  --refseq none \
+  --output_dir out \
+  --output_name 34_explicit_multilocus_breakpoint \
+  --fig_width 16 \
+  --dpi 150
+
+python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_structural_variants.bam \
   --sample_label 'Tumour · deletion, tandem duplication, inversion, and chr1–chr2 translocation' \
   --region chr1:1001-8500 \
   --custom_track 'out/demo_data/variants/demo_structural_variants.vcf.gz,vcf,Somatic SVs · DEL · DUP · INV · TRA,#7a1f5c,pack,0.46' \
