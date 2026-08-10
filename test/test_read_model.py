@@ -1,7 +1,9 @@
 import os
 import sys
+from array import array
 
 import pysam
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -132,3 +134,47 @@ def test_no_reference_means_no_mismatch_computation():
     read = AlignedRead(segment, reference=None)
     assert read.mismatch_count == 0
     assert read.mismatches == []
+
+
+def test_mm_ml_base_modifications_are_mapped_to_reference_positions():
+    header = pysam.AlignmentHeader.from_references(["chr1"], [1000])
+    segment = pysam.AlignedSegment(header)
+    segment.query_name = "modified"
+    segment.query_sequence = "ACCCGCC"
+    segment.flag = 0
+    segment.reference_id = 0
+    segment.reference_start = 100
+    segment.mapping_quality = 60
+    segment.cigarstring = "7M"
+    segment.query_qualities = pysam.qualitystring_to_array("I" * 7)
+    segment.set_tag("MM", "C+m,0,1;")
+    segment.set_tag("ML", array("B", [255, 128]))
+
+    read = AlignedRead(segment)
+
+    assert [item.ref_position for item in read.base_modifications] == [101, 103]
+    assert [item.query_position for item in read.base_modifications] == [1, 3]
+    assert [item.label for item in read.base_modifications] == ["5mC", "5mC"]
+    assert read.base_modifications[0].probability == pytest.approx(255 / 256)
+    assert read.base_modifications[1].probability == pytest.approx(0.5)
+
+
+def test_reverse_mm_calls_use_reference_oriented_query_positions():
+    header = pysam.AlignmentHeader.from_references(["chr1"], [1000])
+    segment = pysam.AlignedSegment(header)
+    segment.query_name = "reverse_modified"
+    segment.query_sequence = "GGCGGGT"  # reverse complement of original ACCCGCC
+    segment.flag = 16
+    segment.reference_id = 0
+    segment.reference_start = 100
+    segment.mapping_quality = 60
+    segment.cigarstring = "7M"
+    segment.query_qualities = pysam.qualitystring_to_array("I" * 7)
+    segment.set_tag("MM", "C+m,0,1;")
+    segment.set_tag("ML", array("B", [255, 128]))
+
+    read = AlignedRead(segment)
+
+    assert [item.ref_position for item in read.base_modifications] == [103, 105]
+    assert all(item.strand == 1 for item in read.base_modifications)
+    assert all(item.aligned_base == "G" for item in read.base_modifications)

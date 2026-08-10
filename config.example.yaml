@@ -53,6 +53,11 @@ preferences:
   # tag_filter: [Library_A, Library_B, untagged]
   # tag_label: Library
   # tag_color: ["Library_A=#377eb8", "Library_B=#e6862d"]
+  # ONT/PacBio preset; enables strand colours and MM/ML display when available.
+  long_read_mode: false
+  base_modifications: false
+  # modification_code: [5mC, 6mA]
+  min_mod_probability: 0.50
   view_as_pairs: false
   center_guide: false
   sashimi: false
@@ -124,6 +129,11 @@ track_colors:
   baf: "#7a1f5c"
   peak: "#7b3294"
   signal: "#2c7fb8"
+  # Rao-style white-to-red Hi-C defaults. A per-track custom colour replaces
+  # the high-contact red while hic_contact_low remains the low-intensity end.
+  tad: "#a50f15"
+  hic_loop: "#b2182b"
+  hic_contact_low: "#fff5f0"
 
 visual_colors:
   # CIGAR insertion events remain distinct from paired-end small inserts.
@@ -166,6 +176,18 @@ tag_colors:
   # Library_A: "#377eb8"
   # Library_B: "#e6862d"
 
+long_read_colors:
+  forward: "#4c78a8"
+  reverse: "#e45756"
+  supplementary: "#8a60a8"
+
+# Common SAM MM codes receive familiar labels; arbitrary labels may be added.
+modification_colors:
+  5mC: "#7a1f5c"
+  5hmC: "#2c7fb8"
+  6mA: "#e6862d"
+  other: "#555555"
+
 cytoband_colors:
   gneg: "#ffffff"
   gpos25: "#c8c8c8"
@@ -197,7 +219,9 @@ styles:
   cnv_track_height_in: 1.15
   baf_track_height_in: 1.05
   peak_track_height_in: 1.05
+  hic_track_height_in: 1.20
   coverage_track_height_in: 1.40
+  modification_track_height_in: 1.05
   ideogram_height_in: 0.34
   panel_header_height_in: 0.30
   reference_height_in: 0.38
@@ -205,6 +229,12 @@ styles:
   secondary_alignment_alpha: 0.50
   mapq_alpha_floor: 0.15
   coverage_alpha: 0.85
+  modification_track_alpha: 0.88
+  modification_stem_alpha: 0.34
+  modification_marker_size: 13.0
+  modification_read_marker_size: 9.0
+  modification_letter_min_px: 8.0
+  modification_letter_size: 4.0
   # Wide windows use at most this many mean-depth bins per horizontal pixel.
   coverage_bins_per_pixel: 1.00
   reference_base_alpha: 0.20
@@ -221,6 +251,13 @@ styles:
   # Continuous ChIP/ATAC/DNase signal profiles use their own opacity.
   signal_fill_alpha: 0.82
   density_fill_alpha: 0.45
+  # Called TADs use translucent domain triangles and explicit boundaries.
+  tad_fill_alpha: 0.13
+  tad_boundary_alpha: 0.72
+  # BEDPE Hi-C contacts use score-scaled arcs and visible anchor blocks.
+  hic_loop_alpha: 0.72
+  hic_anchor_alpha: 0.90
+  hic_contact_map_alpha: 0.96
   haplotype_lane_alpha: 0.055
   tag_lane_alpha: 0.055
   # Reads have no rectangular border by default.
@@ -252,6 +289,12 @@ styles:
   gene_arrow_spacing_px: 32.0
   peak_summit_width: 0.85
   signal_line_width: 0.75
+  tad_line_width: 1.00
+  hic_loop_min_width: 0.65
+  hic_loop_max_width: 3.20
+  # Values below 1 make weak contacts more visible; 1 is linear intensity.
+  hic_contact_gamma: 0.68
+  hic_contact_cell_edge_width: 0.12
   # Zero scales each signal automatically. Set a positive common maximum when
   # comparing normalized samples.
   signal_y_max: 0.0
