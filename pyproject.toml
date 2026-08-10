@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "locus-snap"
-version = "0.2.0"
+version = "0.3.0"
 description = "Render IGV-like genomic snapshots from an indexed BAM without opening a genome browser."
 readme = "README.md"
 license = "MIT"

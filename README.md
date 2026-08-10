@@ -855,3 +855,42 @@ A GitHub Actions workflow ([.github/workflows/ci.yml](.github/workflows/ci.yml))
 runs the complete suite on every push and pull request against Python
 3.9–3.14, mirroring the [Tox](#test-supported-python-versions-with-tox)
 matrix above.
+
+## Releasing to PyPI
+
+[.github/workflows/publish.yml](.github/workflows/publish.yml) publishes a
+new release automatically when a `vX.Y.Z` tag is pushed:
+
+```bash
+# 1. bump the version (single source of truth for the whole package)
+#    in pyproject.toml, e.g. version = "0.3.0"
+git commit -am "Release 0.3.0"
+git tag v0.3.0
+git push origin main v0.3.0
+```
+
+The workflow runs the full test suite first; publishing only proceeds if it
+passes, and it independently double-checks that the pushed tag matches
+`pyproject.toml`'s `version` before building, so a stray or mistyped tag
+fails loudly instead of publishing the wrong version. Ordinary commits to
+`main` never trigger a publish.
+
+It authenticates to PyPI via
+[Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC) —
+no API token is stored in this repo. This requires a one-time setup on
+PyPI's side: on the [locus-snap PyPI project](https://pypi.org/project/locus-snap/)
+page, under **Publishing** → **Add a new publisher**, register a GitHub
+publisher with:
+
+| Field | Value |
+|---|---|
+| Owner | `GENCARDIO` |
+| Repository name | `LocusSnap` |
+| Workflow name | `publish.yml` |
+| Environment name | `pypi` |
+
+The `pypi` environment name must match `environment.name` in
+`publish.yml`; creating a matching
+[GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)
+named `pypi` in this repo's settings (Settings → Environments) additionally
+lets you require manual approval before a publish runs, if wanted.
