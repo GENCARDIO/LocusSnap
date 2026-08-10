@@ -12,6 +12,15 @@ preferences:
   max_alignment_depth: 100
   # Set false for track-only figures such as normalized ChIP-seq profiles.
   show_alignments: true
+  show_legend: true
+  # none, major, major_minor, or bands
+  grid_mode: major
+  # Highlight intervals use the same 1-based inclusive syntax as --region.
+  # highlight: ["chr1:100100-100250", "chr1:100500-100600"]
+  highlight_color: "#ffd54f"
+  highlight_alpha: 0.20
+  # Horizontal placement of the figure title and subtitle.
+  title_align: left
   long_gap_threshold: 10
   min_mapq: 0
   include_secondary: false
@@ -53,8 +62,8 @@ preferences:
 alignment_colors:
   normal: "#b0b0b0"
   large_insert: "#e34948"
-  # The small-insert colour is also used for CIGAR insertion markers.
-  small_insert: "#4a3aa7"
+  # A slightly darker shade of the RR blue keeps the pair categories related.
+  small_insert: "#1029a8"
   # Exact IGV pair-orientation colours: FF maps to IGV LL for an FR library.
   ff: "#009696"
   rr: "#1432c8"
@@ -109,11 +118,15 @@ track_colors:
   signal: "#2c7fb8"
 
 visual_colors:
+  # CIGAR insertion events remain distinct from paired-end small inserts.
+  insertion: "#4a3aa7"
   deletion: "#0b0b0b"
   reference_skip: "#898781"
   softclip: "#1baf7a"
   coverage: "#a3a3a3"
   gridline: "#e1e0d9"
+  gridline_minor: "#eeede8"
+  grid_band: "#f4f4f1"
   axis: "#898781"
   primary_text: "#0b0b0b"
   secondary_text: "#52514e"
@@ -179,6 +192,13 @@ styles:
   # Wide windows use at most this many mean-depth bins per horizontal pixel.
   coverage_bins_per_pixel: 1.00
   reference_base_alpha: 0.20
+  # At close zoom, show the sequence of soft-clipped bases inside each cell.
+  softclip_base_letter_min_px: 8.0
+  softclip_base_letter_size: 4.2
+  # Close-zoom insertions use IGV's narrow purple marker with a white I.
+  insertion_marker_width_bp: 0.4
+  insertion_symbol_min_px: 6.0
+  insertion_symbol_size: 4.2
   cnv_fill_alpha: 0.28
   baf_alpha: 0.90
   peak_fill_alpha: 0.55
@@ -200,11 +220,19 @@ styles:
   split_read_line_width: 0.55
   squish_split_read_line_width: 0.30
   grid_line_width: 0.60
+  grid_line_alpha: 1.00
+  grid_line_style: "-"
+  # major_minor divides every major interval into this many cells.
+  grid_minor_divisions: 4
+  minor_grid_line_width: 0.40
+  minor_grid_line_alpha: 0.90
+  minor_grid_line_style: ":"
+  grid_band_alpha: 0.55
   gene_line_width: 0.55
   primary_gene_line_width: 0.85
   # Every visible intron gets at least one strand-direction arrow.
-  gene_arrow_size: 2.70
-  gene_arrow_spacing_px: 24.0
+  gene_arrow_size: 3.10
+  gene_arrow_spacing_px: 32.0
   peak_summit_width: 0.85
   signal_line_width: 0.75
   # Zero scales each signal automatically. Set a positive common maximum when

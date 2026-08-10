@@ -7,20 +7,16 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from locus_snap import apply_config_preferences, build_parser
-import simple_bam_snap as legacy_cli
 from locus_snap.config import (
     DEFAULT_ALIGNMENT_COLORS,
     DEFAULT_BASE_COLORS,
     DEFAULT_CHROMOSOME_COLORS,
     DEFAULT_INSERTION_COLOR,
+    DEFAULT_VISUAL_COLORS,
     load_alignment_colors,
     load_config,
 )
 from locus_snap.render import AlignmentRenderer, chrom_color
-
-
-def test_legacy_cli_reexports_locus_snap_parser():
-    assert legacy_cli.build_parser is build_parser
 
 
 def test_partial_alignment_color_config_inherits_defaults(tmp_path):
@@ -69,8 +65,11 @@ def test_renderer_uses_configured_pair_category_color():
     assert alpha == 0.9
 
 
-def test_default_small_insert_colour_matches_cigar_insertions():
-    assert DEFAULT_ALIGNMENT_COLORS["small_insert"] == DEFAULT_INSERTION_COLOR
+def test_default_small_insert_is_darker_than_rr_and_distinct_from_cigar_insertions():
+    assert DEFAULT_ALIGNMENT_COLORS["small_insert"] == "#1029a8"
+    assert DEFAULT_ALIGNMENT_COLORS["rr"] == "#1432c8"
+    assert DEFAULT_VISUAL_COLORS["insertion"] == DEFAULT_INSERTION_COLOR
+    assert DEFAULT_ALIGNMENT_COLORS["small_insert"] != DEFAULT_INSERTION_COLOR
 
 
 def test_default_same_strand_pair_colours_match_igv():
@@ -176,6 +175,12 @@ def test_yaml_preferences_become_defaults_but_cli_still_wins():
         "max_alignment_depth": 175,
         "view_as_pairs": True,
         "show_alignments": False,
+        "show_legend": False,
+        "grid_mode": "bands",
+        "highlight": ["chr1:2-4", "chr1:7-9"],
+        "highlight_color": "#abcdef",
+        "highlight_alpha": 0.3,
+        "title_align": "center",
         "show_coverage": False,
         "show_indel_lengths": True,
         "include_supplementary": False,
@@ -194,6 +199,12 @@ def test_yaml_preferences_become_defaults_but_cli_still_wins():
     assert configured.max_alignment_depth == 175
     assert configured.view_as_pairs
     assert configured.no_alignments
+    assert configured.no_legend
+    assert configured.grid_mode == "bands"
+    assert configured.highlight == ["chr1:2-4", "chr1:7-9"]
+    assert configured.highlight_color == "#abcdef"
+    assert configured.highlight_alpha == pytest.approx(0.3)
+    assert configured.title_align == "center"
     assert configured.no_coverage
     assert configured.show_indel_lengths
     assert configured.exclude_supplementary

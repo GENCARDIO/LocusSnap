@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate the deterministic BAM and tabix files used by demo figures."""
-from math import exp
+from dataclasses import dataclass
+from math import exp, log2
 from pathlib import Path
 from random import Random
 
@@ -17,6 +18,59 @@ REFERENCE_DIR = DEMO_DATA_DIR / "reference"
 SIGNALS_DIR = DEMO_DATA_DIR / "signals"
 VARIANTS_DIR = DEMO_DATA_DIR / "variants"
 REFERENCE_PATH = REFERENCE_DIR / "demo_reference.fa"
+CNV_REFERENCE_PATH = REFERENCE_DIR / "demo_cnv_reference.fa"
+
+CNV_CHROM = "chrCNV"
+CNV_LENGTH = 80_000
+CNV_READ_LENGTH = 150
+CNV_BASELINE_DEPTH = 30.0
+CNV_TUMOUR_PURITY = 0.75
+SEQUENCING_ERROR_RATE = 0.0015
+
+
+@dataclass(frozen=True)
+class CopyNumberSegment:
+    start: int
+    end: int
+    label: str
+    total_copy_number: int
+    minor_copy_number: int
+
+    def observed_copy_ratio(self, purity: float = CNV_TUMOUR_PURITY) -> float:
+        tumour_copies = purity * self.total_copy_number
+        normal_copies = (1.0 - purity) * 2
+        return (tumour_copies + normal_copies) / 2
+
+    def log2_ratio(self, purity: float = CNV_TUMOUR_PURITY) -> float:
+        return log2(self.observed_copy_ratio(purity))
+
+    def baf_centres(self, purity: float = CNV_TUMOUR_PURITY):
+        total = purity * self.total_copy_number + (1.0 - purity) * 2
+        minor = purity * self.minor_copy_number + (1.0 - purity)
+        lower = minor / total
+        if abs(lower - 0.5) < 1e-9:
+            return (0.5,)
+        return (lower, 1.0 - lower)
+
+
+CNV_SEGMENTS = (
+    CopyNumberSegment(0, 15_000, "CN2 diploid", 2, 1),
+    CopyNumberSegment(15_000, 35_000, "CN1 loss + LOH", 1, 0),
+    CopyNumberSegment(35_000, 50_000, "CN2 diploid", 2, 1),
+    CopyNumberSegment(50_000, 70_000, "CN3 gain (1+2)", 3, 1),
+    CopyNumberSegment(70_000, 80_000, "CN2 diploid", 2, 1),
+)
+
+
+@dataclass
+class SimulatedVariant:
+    position: int
+    ref: str
+    alt: str
+    target_baf: float
+    segment: CopyNumberSegment
+    ref_depth: int = 0
+    alt_depth: int = 0
 
 
 def ensure_demo_directories() -> None:
@@ -32,39 +86,52 @@ def alternate_base(reference_base: str) -> str:
     return substitutions.get(reference_base, "A")
 
 
+def add_sequencing_errors(sequence, qualities, rng: Random, error_rate: float) -> None:
+    """Add sparse low-quality substitutions without changing read length."""
+    for index, base in enumerate(sequence):
+        if rng.random() >= error_rate:
+            continue
+        sequence[index] = rng.choice([candidate for candidate in "ACGT" if candidate != base])
+        qualities[index] = 12
+
+
 def create_variant_read(
     header, reference: str, read_index: int, sample_name: str,
-    variant_fractions,
+    variant_fractions, rng: Random,
 ):
     read_length = 100
-    start = 62 + ((read_index * 7) % 24)
+    start = max(45, min(100, round(rng.gauss(73, 11))))
     sequence = list(reference[start:start + read_length])
     for position, fraction in variant_fractions.items():
         query_position = position - start
         if query_position < 0 or query_position >= len(sequence):
             continue
-        carrier_score = (read_index * 37 + position * 11) % 100
-        if carrier_score < round(fraction * 100):
+        if rng.random() < fraction:
             sequence[query_position] = alternate_base(sequence[query_position])
+    qualities = [40] * len(sequence)
+    add_sequencing_errors(sequence, qualities, rng, SEQUENCING_ERROR_RATE)
 
     read = pysam.AlignedSegment(header)
     read.query_name = f"{sample_name}_read_{read_index + 1:03d}"
     read.query_sequence = "".join(sequence)
-    read.flag = 16 if read_index % 2 else 0
+    read.flag = 16 if rng.random() < 0.5 else 0
     read.reference_id = 0
     read.reference_start = start
-    read.mapping_quality = 60 - (read_index % 4) * 5
+    read.mapping_quality = max(35, min(60, round(rng.gauss(56, 4))))
     read.cigar = [(0, read_length)]
-    read.query_qualities = pysam.qualitystring_to_array("I" * read_length)
+    read.query_qualities = qualities
     if read_index % 3 != 2:
         read.set_tag("HP", 1 if read_index % 3 == 0 else 2)
         read.set_tag("PS", 1001 if read_index % 6 < 3 else 1002)
     return read
 
 
-def write_variant_bam(path: Path, sample_name: str, read_count: int, profile) -> None:
+def write_variant_bam(
+    path: Path, sample_name: str, read_count: int, profile, seed: int,
+) -> None:
     with pysam.FastaFile(str(REFERENCE_PATH)) as fasta:
         reference = fasta.fetch("chrDemo").upper()
+    rng = Random(seed)
     header_dict = {
         "HD": {"VN": "1.6", "SO": "coordinate"},
         "SQ": [{"SN": "chrDemo", "LN": len(reference)}],
@@ -75,7 +142,7 @@ def write_variant_bam(path: Path, sample_name: str, read_count: int, profile) ->
     for read_index in range(read_count):
         reads.append(
             create_variant_read(
-                header, reference, read_index, sample_name.lower(), profile
+                header, reference, read_index, sample_name.lower(), profile, rng
             )
         )
     reads.sort(key=lambda read: (read.reference_start, read.query_name))
@@ -86,6 +153,253 @@ def write_variant_bam(path: Path, sample_name: str, read_count: int, profile) ->
     if index_path.exists():
         index_path.unlink()
     pysam.index(str(path))
+
+
+def write_insertion_bam(path: Path) -> None:
+    """Write close-zoom reads with short CIGAR insertions at one breakpoint."""
+    with pysam.FastaFile(str(REFERENCE_PATH)) as fasta:
+        reference = fasta.fetch("chrDemo").upper()
+    header_dict = {
+        "HD": {"VN": "1.6", "SO": "coordinate"},
+        "SQ": [{"SN": "chrDemo", "LN": len(reference)}],
+        "RG": [{"ID": "INS", "SM": "Insertion_demo"}],
+    }
+    header = pysam.AlignmentHeader.from_dict(header_dict)
+    reads = []
+    breakpoint = 120
+    motifs = ("TGCA", "ACGT", "GGTT", "CAGA", "TTAC", "AGGC")
+    for read_index, inserted_sequence in enumerate(motifs):
+        start = 91 + read_index
+        left_match = breakpoint - start
+        right_match = 55
+        sequence = (
+            reference[start:breakpoint]
+            + inserted_sequence
+            + reference[breakpoint:breakpoint + right_match]
+        )
+        read = pysam.AlignedSegment(header)
+        read.query_name = f"insertion_read_{read_index + 1:02d}"
+        read.query_sequence = sequence
+        read.flag = 16 if read_index % 2 else 0
+        read.reference_id = 0
+        read.reference_start = start
+        read.mapping_quality = 60
+        read.cigar = [(0, left_match), (1, len(inserted_sequence)), (0, right_match)]
+        read.query_qualities = pysam.qualitystring_to_array("I" * len(sequence))
+        read.set_tag("RG", "INS")
+        reads.append(read)
+    reads.sort(key=lambda read: (read.reference_start, read.query_name))
+    with pysam.AlignmentFile(str(path), "wb", header=header) as bam:
+        for read in reads:
+            bam.write(read)
+    index_path = Path(f"{path}.bai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.index(str(path))
+
+
+def copy_number_segment_at(position: int) -> CopyNumberSegment:
+    for segment in CNV_SEGMENTS:
+        if segment.start <= position < segment.end:
+            return segment
+    raise ValueError(f"Position {position} is outside the simulated CNV locus.")
+
+
+def write_cnv_reference(path: Path) -> str:
+    rng = Random(18_018)
+    sequence = "".join(rng.choices("ACGT", weights=(29, 21, 21, 29), k=CNV_LENGTH))
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(f">{CNV_CHROM}\n")
+        for offset in range(0, len(sequence), 80):
+            handle.write(sequence[offset:offset + 80] + "\n")
+    index_path = Path(f"{path}.fai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.faidx(str(path))
+    return sequence
+
+
+def write_small_reference(path: Path) -> str:
+    rng = Random(8_008)
+    sequence = "".join(rng.choices("ACGT", weights=(29, 21, 21, 29), k=800))
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(">chrDemo\n")
+        for offset in range(0, len(sequence), 80):
+            handle.write(sequence[offset:offset + 80] + "\n")
+    index_path = Path(f"{path}.fai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.faidx(str(path))
+    return sequence
+
+
+def write_small_variant_vcf(
+    path: Path, reference: str, profile, sample_prefix: str,
+) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write("##fileformat=VCFv4.2\n")
+        handle.write(f"##contig=<ID=chrDemo,length={len(reference)}>\n")
+        handle.write(
+            '##INFO=<ID=EXPECTED_AF,Number=1,Type=Float,'
+            'Description="Expected synthetic allele fraction">\n'
+        )
+        handle.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
+        for index, (position, fraction) in enumerate(sorted(profile.items()), start=1):
+            ref = reference[position]
+            handle.write(
+                f"chrDemo\t{position + 1}\t{sample_prefix}-SNV-{index:02d}\t"
+                f"{ref}\t{alternate_base(ref)}\t100\tPASS\t"
+                f"EXPECTED_AF={fraction:.3f}\n"
+            )
+
+
+def build_cnv_variant_sites(reference: str) -> list[SimulatedVariant]:
+    rng = Random(18_019)
+    sites = []
+    cursor = 700
+    while cursor < CNV_LENGTH - 500:
+        position = min(cursor + rng.randint(-160, 160), CNV_LENGTH - 501)
+        segment = copy_number_segment_at(position)
+        centres = segment.baf_centres()
+        target_baf = centres[len(sites) % len(centres)]
+        ref = reference[position]
+        sites.append(SimulatedVariant(
+            position=position,
+            ref=ref,
+            alt=alternate_base(ref),
+            target_baf=target_baf,
+            segment=segment,
+        ))
+        cursor += rng.randint(780, 1_120)
+    return sites
+
+
+def write_cnv_tumour_bam(
+    path: Path, reference: str, sites: list[SimulatedVariant],
+) -> int:
+    """Simulate one impure tumour whose depth and BAF follow the CN state."""
+    header_dict = {
+        "HD": {"VN": "1.6", "SO": "coordinate"},
+        "SQ": [{"SN": CNV_CHROM, "LN": len(reference)}],
+        "RG": [{"ID": "TumourCNV", "SM": "Tumour_CNV_75pct"}],
+    }
+    header = pysam.AlignmentHeader.from_dict(header_dict)
+    rng = Random(18_020)
+    reads = []
+    read_index = 0
+    for segment in CNV_SEGMENTS:
+        target_depth = CNV_BASELINE_DEPTH * segment.observed_copy_ratio()
+        read_count = round(
+            (segment.end - segment.start) * target_depth / CNV_READ_LENGTH
+        )
+        segment_sites = [
+            site for site in sites
+            if segment.start <= site.position < segment.end
+        ]
+        for _ in range(read_count):
+            read_index += 1
+            midpoint = rng.randrange(segment.start, segment.end)
+            start = max(0, min(
+                len(reference) - CNV_READ_LENGTH,
+                midpoint - CNV_READ_LENGTH // 2,
+            ))
+            sequence = list(reference[start:start + CNV_READ_LENGTH])
+            for site in segment_sites:
+                query_position = site.position - start
+                if 0 <= query_position < len(sequence) and rng.random() < site.target_baf:
+                    sequence[query_position] = site.alt
+            qualities = [36] * len(sequence)
+            add_sequencing_errors(
+                sequence, qualities, rng, SEQUENCING_ERROR_RATE
+            )
+            for site in segment_sites:
+                query_position = site.position - start
+                if not 0 <= query_position < len(sequence):
+                    continue
+                if sequence[query_position] == site.ref:
+                    site.ref_depth += 1
+                elif sequence[query_position] == site.alt:
+                    site.alt_depth += 1
+
+            read = pysam.AlignedSegment(header)
+            read.query_name = f"tumour_cnv_read_{read_index:05d}"
+            read.query_sequence = "".join(sequence)
+            read.flag = 16 if rng.random() < 0.5 else 0
+            read.reference_id = 0
+            read.reference_start = start
+            read.mapping_quality = max(35, min(60, round(rng.gauss(55, 5))))
+            read.cigar = [(0, CNV_READ_LENGTH)]
+            read.query_qualities = qualities
+            read.set_tag("RG", "TumourCNV")
+            reads.append(read)
+
+    reads.sort(key=lambda read: (read.reference_start, read.query_name))
+    with pysam.AlignmentFile(str(path), "wb", header=header) as bam:
+        for read in reads:
+            bam.write(read)
+    index_path = Path(f"{path}.bai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.index(str(path))
+    return len(reads)
+
+
+def write_cnv_baf_vcf(path: Path, sites: list[SimulatedVariant]) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write("##fileformat=VCFv4.2\n")
+        handle.write(f"##contig=<ID={CNV_CHROM},length={CNV_LENGTH}>\n")
+        handle.write('##INFO=<ID=STATE,Number=1,Type=String,Description="Copy-number state">\n')
+        handle.write('##INFO=<ID=TCN,Number=1,Type=Integer,Description="Tumour total copy number">\n')
+        handle.write('##INFO=<ID=MCN,Number=1,Type=Integer,Description="Tumour minor copy number">\n')
+        handle.write('##INFO=<ID=TARGET_BAF,Number=1,Type=Float,Description="Purity-adjusted expected BAF">\n')
+        handle.write('##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n')
+        handle.write('##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allele depths">\n')
+        handle.write('##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read depth">\n')
+        handle.write(
+            f"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tTumour\n"
+        )
+        for index, site in enumerate(sites, start=1):
+            depth = site.ref_depth + site.alt_depth
+            state = site.segment.label.replace(" ", "_").replace("+", "plus")
+            handle.write(
+                f"{CNV_CHROM}\t{site.position + 1}\tcnv-het-{index:03d}\t"
+                f"{site.ref}\t{site.alt}\t100\tPASS\tSTATE={state};"
+                f"TCN={site.segment.total_copy_number};"
+                f"MCN={site.segment.minor_copy_number};"
+                f"TARGET_BAF={site.target_baf:.4f}\tGT:AD:DP\t"
+                f"0/1:{site.ref_depth},{site.alt_depth}:{depth}\n"
+            )
+
+
+def write_copy_number_tracks(seg_path: Path, state_path: Path) -> None:
+    legacy_segments = (
+        (101_867_481, 101_867_500, 18, -0.70),
+        (101_867_501, 101_867_520, 21, -0.42),
+        (101_867_521, 101_867_540, 17, -0.08),
+        (101_867_541, 101_867_560, 20, 0.28),
+        (101_867_561, 101_867_580, 24, 0.62),
+        (101_867_581, 101_867_600, 19, 0.88),
+        (101_867_601, 101_867_620, 16, 0.18),
+    )
+    with seg_path.open("w", encoding="utf-8") as handle:
+        handle.write("Sample\tChromosome\tStart\tEnd\tNum_Probes\tSegment_Mean\n")
+        for start, end, probes, value in legacy_segments:
+            handle.write(
+                f"Tumour\tchr9\t{start}\t{end}\t{probes}\t{value:.2f}\n"
+            )
+        for segment in CNV_SEGMENTS:
+            probe_count = max(20, (segment.end - segment.start) // 250)
+            handle.write(
+                f"Tumour\t{CNV_CHROM}\t{segment.start + 1}\t{segment.end}\t"
+                f"{probe_count}\t{segment.log2_ratio():.3f}\n"
+            )
+    with state_path.open("w", encoding="utf-8") as handle:
+        for segment in CNV_SEGMENTS:
+            baf = "/".join(f"{centre:.2f}" for centre in segment.baf_centres())
+            label = f"{segment.label} · BAF {baf}"
+            handle.write(
+                f"{CNV_CHROM}\t{segment.start}\t{segment.end}\t{label}\n"
+            )
 
 
 def create_rna_read(header, name: str, start: int, cigar, reverse: bool):
@@ -558,9 +872,38 @@ def main() -> None:
     relapse_profile = {
         104: 0.24, 118: 0.51, 145: 0.64, 158: 0.43, 169: 0.33,
     }
-    write_variant_bam(ALIGNMENTS_DIR / "demo_tumour.bam", "Tumour", 96, tumour_profile)
-    write_variant_bam(ALIGNMENTS_DIR / "demo_normal.bam", "Normal", 72, normal_profile)
-    write_variant_bam(ALIGNMENTS_DIR / "demo_relapse.bam", "Relapse", 84, relapse_profile)
+    small_reference = write_small_reference(REFERENCE_PATH)
+    write_small_variant_vcf(
+        VARIANTS_DIR / "demo_tumour.vcf", small_reference,
+        tumour_profile, "T",
+    )
+    write_small_variant_vcf(
+        VARIANTS_DIR / "demo_relapse.vcf", small_reference,
+        relapse_profile, "R",
+    )
+    write_variant_bam(
+        ALIGNMENTS_DIR / "demo_tumour.bam", "Tumour", 240,
+        tumour_profile, seed=9_601,
+    )
+    write_variant_bam(
+        ALIGNMENTS_DIR / "demo_normal.bam", "Normal", 180,
+        normal_profile, seed=7_201,
+    )
+    write_variant_bam(
+        ALIGNMENTS_DIR / "demo_relapse.bam", "Relapse", 210,
+        relapse_profile, seed=8_401,
+    )
+    write_insertion_bam(ALIGNMENTS_DIR / "demo_insertions.bam")
+    cnv_reference = write_cnv_reference(CNV_REFERENCE_PATH)
+    cnv_sites = build_cnv_variant_sites(cnv_reference)
+    cnv_read_count = write_cnv_tumour_bam(
+        ALIGNMENTS_DIR / "demo_cnv_tumour.bam", cnv_reference, cnv_sites,
+    )
+    write_cnv_baf_vcf(VARIANTS_DIR / "demo_baf.vcf", cnv_sites)
+    write_copy_number_tracks(
+        ANNOTATIONS_DIR / "demo_cnv.seg",
+        ANNOTATIONS_DIR / "demo_cnv_states.bed",
+    )
     write_met_ex14_bam(ALIGNMENTS_DIR / "demo_met_ex14.bam")
     write_met_ex14_tracks()
     write_structural_variant_bam(ALIGNMENTS_DIR / "demo_structural_variants.bam")
@@ -592,7 +935,10 @@ def main() -> None:
     refresh_tabix(SIGNALS_DIR / "demo_ctcf_control.signal", "bed")
     refresh_tabix(SIGNALS_DIR / "demo_ctcf_knockdown.signal", "bed")
     refresh_tabix(SIGNALS_DIR / "demo_ctcf_mel.signal", "bed")
-    print("Regenerated demo inputs in out/demo_data/")
+    print(
+        "Regenerated demo inputs in out/demo_data/ "
+        f"({cnv_read_count:,} CNV reads; {len(cnv_sites)} BAF loci)."
+    )
 
 
 if __name__ == "__main__":

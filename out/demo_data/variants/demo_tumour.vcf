@@ -1,13 +1,11 @@
 ##fileformat=VCFv4.2
 ##contig=<ID=chrDemo,length=800>
-##INFO=<ID=END,Number=1,Type=Integer,Description="End coordinate of the variant">
+##INFO=<ID=EXPECTED_AF,Number=1,Type=Float,Description="Expected synthetic allele fraction">
 #CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
-chrDemo	96	T-SNV-01	T	C	62	PASS	.
-chrDemo	105	T-SNV-02	A	G	68	PASS	.
-chrDemo	119	T-SNV-03	G	A	75	PASS	.
-chrDemo	133	T-SNV-04	A	G	61	PASS	.
-chrDemo	138	T-INS-01	C	CTG	58	PASS	.
-chrDemo	146	T-SNV-05	T	C	72	PASS	.
-chrDemo	159	T-SNV-06	G	A	66	PASS	.
-chrDemo	164	T-DEL-01	ATC	A	64	PASS	.
-chrDemo	170	T-SNV-07	C	T	70	PASS	.
+chrDemo	96	T-SNV-01	G	A	100	PASS	EXPECTED_AF=0.280
+chrDemo	105	T-SNV-02	A	G	100	PASS	EXPECTED_AF=0.360
+chrDemo	119	T-SNV-03	C	T	100	PASS	EXPECTED_AF=0.480
+chrDemo	133	T-SNV-04	A	G	100	PASS	EXPECTED_AF=0.310
+chrDemo	146	T-SNV-05	C	T	100	PASS	EXPECTED_AF=0.570
+chrDemo	159	T-SNV-06	G	A	100	PASS	EXPECTED_AF=0.270
+chrDemo	170	T-SNV-07	G	A	100	PASS	EXPECTED_AF=0.410

@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+import subprocess
 import struct
 import sys
 
@@ -10,6 +12,18 @@ from locus_snap.snapshot import BamSnapshot, resolve_output_path
 
 
 TEST_BAM = os.path.join(os.path.dirname(__file__), "test.bam")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_source_checkout_launcher_runs_the_canonical_cli(tmp_path):
+    result = subprocess.run(
+        [sys.executable, str(PROJECT_ROOT / "locus_snap.py"), "--help"],
+        cwd=tmp_path, capture_output=True, text=True, check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--region REGION" in result.stdout
+    assert "--bam BAM" in result.stdout
 
 
 def test_output_path_defaults_infers_and_overrides_formats(tmp_path):

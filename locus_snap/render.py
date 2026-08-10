@@ -8,13 +8,14 @@ mismatches are geometrically exact instead of guessed from column spacing.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil, sqrt
+from math import ceil, floor, log10, sqrt
 from operator import attrgetter
 from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import is_color_like
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, PathPatch, Polygon, Rectangle
 from matplotlib.path import Path
@@ -40,6 +41,9 @@ from locus_snap.reference import ReferenceWindow
 
 DEFAULT_COVERAGE_VAF_THRESHOLD = 0.20
 DEFAULT_MAX_REFERENCE_SPAN = 250
+MAX_EXPLICIT_MATE_CHROMOSOMES = 2
+GRID_MODES = ("none", "major", "major_minor", "bands")
+TITLE_ALIGNMENTS = ("left", "center", "right")
 
 # Discordant-pair legend labels, IGV-equivalent: same categories/roles IGV's
 # "color by insert size and pair orientation" mode uses (red = long insert,
@@ -50,7 +54,7 @@ PAIR_CATEGORY_LABELS = {
     "small_insert": "Small insert",
     "ff": "FF (same strand)",
     "rr": "RR (same strand)",
-    "everted": "Everted (RF)",
+    "everted": "Reverted (RF)",
     "interchrom": "Inter-chromosomal",
 }
 
@@ -62,6 +66,14 @@ class SnvEvidence:
     reverse: int = 0
     base_quality_sum: int = 0
     mapq_sum: int = 0
+
+
+@dataclass(frozen=True)
+class HighlightRegion:
+    """A zero-based, half-open genomic interval highlighted across tracks."""
+    chrom: str
+    start: int
+    end: int
 
 
 def compute_feature_density(
@@ -94,6 +106,31 @@ def compute_feature_density(
         centers.append(window_start + (index + 0.5) * bin_width)
         densities.append(running)
     return centers, densities
+
+
+def nice_scale_length(window_span: int) -> int:
+    """Choose a UCSC-like 1/2/5 ruler length that fits most of the window."""
+    if window_span <= 0:
+        return 0
+    target = max(window_span * 0.8, 1)
+    magnitude = 10 ** floor(log10(target))
+    candidates = [magnitude * multiplier for multiplier in (1, 2, 5, 10)]
+    selected = candidates[0]
+    for candidate in candidates:
+        if candidate <= target:
+            selected = candidate
+    return min(max(int(selected), 1), window_span)
+
+
+def format_scale_length(length: int) -> str:
+    """Format an integer base-pair ruler length without scientific notation."""
+    if length >= 1_000_000_000:
+        return f"{length / 1_000_000_000:g} Gb"
+    if length >= 1_000_000:
+        return f"{length / 1_000_000:g} Mb"
+    if length >= 1_000:
+        return f"{length / 1_000:g} kb"
+    return f"{length} bp"
 
 
 def chrom_color(
@@ -404,6 +441,7 @@ class AlignmentRenderer:
         fig_width: float = 14.0,
         dpi: int = 150,
         show_alignments: bool = True,
+        show_legend: bool = True,
         show_coverage: bool = True,
         annotate_gap: bool = True,
         max_mismatch_render_span: int = 5000,
@@ -428,6 +466,11 @@ class AlignmentRenderer:
         show_sashimi: bool = False,
         min_junction_reads: int = 1,
         sashimi_strand: str = "combined",
+        grid_mode: str = "major",
+        highlight_regions: Optional[List[HighlightRegion]] = None,
+        highlight_color: str = "#ffd54f",
+        highlight_alpha: float = 0.20,
+        title_align: str = "left",
     ):
         theme = visual_config or load_config()
         self.base_colors = dict(theme["base_colors"])
@@ -452,6 +495,32 @@ class AlignmentRenderer:
         self.fig_width = fig_width
         self.dpi = dpi
         self.show_alignments = show_alignments
+        self.show_legend = show_legend
+        if grid_mode not in GRID_MODES:
+            raise ValueError(
+                f"Unknown grid mode '{grid_mode}'. Choose {', '.join(GRID_MODES)}."
+            )
+        self.grid_mode = grid_mode
+        if not is_color_like(highlight_color):
+            raise ValueError(f"Invalid highlight color: {highlight_color!r}.")
+        if (
+            isinstance(highlight_alpha, bool)
+            or not isinstance(highlight_alpha, (int, float))
+            or not 0 < highlight_alpha <= 1
+        ):
+            raise ValueError("Highlight alpha must be greater than 0 and at most 1.")
+        self.highlight_regions = list(highlight_regions or [])
+        for region in self.highlight_regions:
+            if region.end <= region.start:
+                raise ValueError("Highlight region end must be greater than its start.")
+        self.highlight_color = highlight_color
+        self.highlight_alpha = float(highlight_alpha)
+        if title_align not in TITLE_ALIGNMENTS:
+            raise ValueError(
+                f"Unknown title alignment '{title_align}'. "
+                f"Choose {', '.join(TITLE_ALIGNMENTS)}."
+            )
+        self.title_align = title_align
         self.show_coverage = show_coverage
         self.annotate_gap = annotate_gap
         self.max_mismatch_render_span = max_mismatch_render_span
@@ -493,7 +562,7 @@ class AlignmentRenderer:
         if haplotype_view != "none":
             legend_group_count = 4
         elif pair_colors:
-            legend_group_count = 5
+            legend_group_count = 4
         else:
             legend_group_count = 3
         if fig_width >= 9:
@@ -503,15 +572,111 @@ class AlignmentRenderer:
             self.legend_height_in = legend_rows * 0.72
         else:
             self.legend_height_in = legend_group_count * 0.62
-        self.legend_bottom_in = 0.04 if show_alignments else 0.08
-        self.legend_plot_gap_in = 0.12 if show_alignments else 0.0
-        self.legend_tick_clearance_in = 0.30
-        if not show_alignments:
+        legend_enabled = show_alignments and show_legend
+        self.legend_bottom_in = 0.04 if legend_enabled else 0.0
+        self.legend_plot_gap_in = 0.12 if legend_enabled else 0.0
+        self.legend_tick_clearance_in = 0.30 if legend_enabled else 0.44
+        if not legend_enabled:
             self.legend_height_in = 0.0
         self.legend_margin_in = (
             self.legend_bottom_in + self.legend_height_in + self.legend_plot_gap_in
             + self.legend_tick_clearance_in
         )
+
+    def draw_background_grid(
+        self,
+        ax,
+        major_ticks: List[int],
+        window_start: int,
+        window_end: int,
+    ) -> None:
+        """Draw a coordinate-aware background shared by genomic tracks.
+
+        Minor lines and alternating bands are derived from the labelled major
+        coordinates, so every track and panel uses the same genomic cadence.
+        """
+        if self.grid_mode == "none" or window_end <= window_start:
+            return
+
+        ticks = sorted({
+            float(tick) for tick in major_ticks
+            if window_start <= tick <= window_end
+        })
+        boundaries = sorted({float(window_start), *ticks, float(window_end)})
+
+        if self.grid_mode == "bands":
+            for index, (left, right) in enumerate(zip(boundaries, boundaries[1:])):
+                if index % 2 == 0 and right > left:
+                    ax.axvspan(
+                        left, right,
+                        facecolor=self.visual_colors["grid_band"],
+                        edgecolor="none",
+                        alpha=self.styles["grid_band_alpha"],
+                        zorder=-1,
+                    )
+
+        if self.grid_mode == "major_minor" and len(boundaries) >= 2:
+            divisions = max(1, int(round(self.styles["grid_minor_divisions"])))
+            if divisions > 1:
+                for left, right in zip(boundaries, boundaries[1:]):
+                    step = (right - left) / divisions
+                    for subdivision in range(1, divisions):
+                        position = left + subdivision * step
+                        ax.axvline(
+                            position,
+                            color=self.visual_colors["gridline_minor"],
+                            alpha=self.styles["minor_grid_line_alpha"],
+                            lw=self.styles["minor_grid_line_width"],
+                            linestyle=self.styles["minor_grid_line_style"],
+                            zorder=0,
+                        )
+
+        for tick in ticks:
+            ax.axvline(
+                tick,
+                color=self.visual_colors["gridline"],
+                alpha=self.styles["grid_line_alpha"],
+                lw=self.styles["grid_line_width"],
+                linestyle=self.styles["grid_line_style"],
+                zorder=0,
+            )
+
+    def draw_highlights(
+        self,
+        ax,
+        chrom: str,
+        window_start: int,
+        window_end: int,
+    ) -> None:
+        """Shade configured intervals behind the data in one genomic track."""
+        normalized_chrom = chrom.lower()
+        if normalized_chrom.startswith("chr"):
+            normalized_chrom = normalized_chrom[3:]
+        for region in self.highlight_regions:
+            region_chrom = region.chrom.lower()
+            if region_chrom.startswith("chr"):
+                region_chrom = region_chrom[3:]
+            if region_chrom != normalized_chrom:
+                continue
+            left = max(region.start, window_start)
+            right = min(region.end, window_end)
+            if right <= left:
+                continue
+            ax.axvspan(
+                left, right,
+                facecolor=self.highlight_color,
+                edgecolor="none",
+                alpha=self.highlight_alpha,
+                zorder=0.25,
+            )
+
+    def figure_title_position(self) -> Tuple[float, str]:
+        """Return the figure x-coordinate and anchor for the title block."""
+        if self.title_align == "center":
+            return 0.50, "center"
+        if self.title_align == "right":
+            return 0.99, "right"
+        return 0.01, "left"
 
     def annotation_track_height(
         self, annotation: LoadedAnnotationTrack, row_count: Optional[int] = None,
@@ -589,6 +754,7 @@ class AlignmentRenderer:
         genomic_tracks: Optional[List[LoadedAnnotationTrack]] = None,
         contig_length: Optional[int] = None,
         cytobands: Optional[List[Cytoband]] = None,
+        assembly_label: Optional[str] = None,
     ) -> None:
         span = window_end - window_start
         n_rows = max(len(rows), 1)
@@ -644,14 +810,18 @@ class AlignmentRenderer:
             for spine in ("top", "right", "left"):
                 ax.spines[spine].set_visible(False)
             ax.spines["bottom"].set_visible(False)
-            ax.tick_params(left=False, labelleft=False)
+            ax.tick_params(
+                left=False, labelleft=False, bottom=False, top=False,
+                labelbottom=False, labeltop=False,
+            )
 
         tick_positions = nice_tick_positions(window_start, window_end)
 
+        title_x, title_ha = self.figure_title_position()
         fig.text(
-            0.01, 1 - 0.06 / fig_height,
+            title_x, 1 - 0.06 / fig_height,
             f"{chrom}:{window_start + 1:,}-{window_end:,} ({span:,} bp)",
-            fontsize=10.5, color=self.visual_colors["primary_text"], fontweight="bold", va="top", ha="left",
+            fontsize=10.5, color=self.visual_colors["primary_text"], fontweight="bold", va="top", ha=title_ha,
         )
         subtitle = title
         if dropped_reads:
@@ -664,9 +834,9 @@ class AlignmentRenderer:
             )
         if subtitle:
             fig.text(
-                0.01, 1 - 0.34 / fig_height,
+                title_x, 1 - 0.34 / fig_height,
                 ellipsize(subtitle, max(30, int(self.fig_width * 15))),
-                fontsize=8.5, color=self.visual_colors["secondary_text"], va="top", ha="left",
+                fontsize=8.5, color=self.visual_colors["secondary_text"], va="top", ha=title_ha,
             )
 
         if "ideogram" in ax_by_track:
@@ -733,15 +903,14 @@ class AlignmentRenderer:
             bottom=True, labelbottom=True, labelsize=9,
             length=3, colors=self.visual_colors["primary_text"],
         )
-        for tick in tick_positions:
-            for track in tracks:
-                if track == "ideogram":
-                    continue
-                if track in ax_by_track:
-                    ax_by_track[track].axvline(
-                        tick, color=self.visual_colors["gridline"],
-                        lw=self.styles["grid_line_width"], zorder=0,
-                    )
+        for track in tracks:
+            if track != "ideogram":
+                self.draw_background_grid(
+                    ax_by_track[track], tick_positions, window_start, window_end
+                )
+                self.draw_highlights(
+                    ax_by_track[track], chrom, window_start, window_end
+                )
 
         for track, ax in ax_by_track.items():
             if track != "ideogram":
@@ -755,11 +924,64 @@ class AlignmentRenderer:
         fig.subplots_adjust(left=plot_left, right=plot_right,
                             top=1 - top_margin_in / fig_height,
                             bottom=bottom_margin_in / fig_height)
-        if self.show_alignments:
+        self.draw_scale_bar(
+            fig, fig_height, plot_left, plot_right, span, assembly_label,
+            offset_from_top_in=0.59,
+        )
+        if self.show_alignments and self.show_legend:
             legends = self.draw_legends(fig, fig_height, plot_left, plot_right)
             self.separate_legend_from_plots(fig, axes, legends)
         fig.savefig(out_path, dpi=self.dpi)
         plt.close(fig)
+
+    def draw_scale_bar(
+        self,
+        fig,
+        fig_height: float,
+        plot_left: float,
+        plot_right: float,
+        window_span: int,
+        assembly_label: Optional[str] = None,
+        offset_from_top_in: float = 0.59,
+    ) -> None:
+        """Draw a UCSC-style labelled genomic ruler in the figure margin."""
+        scale_length = nice_scale_length(window_span)
+        if scale_length <= 0 or plot_right <= plot_left:
+            return
+        line_start = plot_left
+        line_end = plot_left + (plot_right - plot_left) * scale_length / window_span
+        line_y = 1 - offset_from_top_in / fig_height
+        cap_half_height = 0.055 / fig_height
+        line_color = self.visual_colors["primary_text"]
+        line_width = 0.8
+        fig.lines.extend([
+            Line2D(
+                [line_start, line_end], [line_y, line_y],
+                transform=fig.transFigure, color=line_color,
+                linewidth=line_width, solid_capstyle="butt", zorder=20,
+            ),
+            Line2D(
+                [line_start, line_start],
+                [line_y - cap_half_height, line_y + cap_half_height],
+                transform=fig.transFigure, color=line_color,
+                linewidth=line_width, solid_capstyle="butt", zorder=20,
+            ),
+            Line2D(
+                [line_end, line_end],
+                [line_y - cap_half_height, line_y + cap_half_height],
+                transform=fig.transFigure, color=line_color,
+                linewidth=line_width, solid_capstyle="butt", zorder=20,
+            ),
+        ])
+        fig.text(
+            line_start - 0.006, line_y, format_scale_length(scale_length),
+            ha="right", va="center", fontsize=6.8, color=line_color,
+        )
+        if assembly_label:
+            fig.text(
+                plot_right + 0.006, line_y, ellipsize(assembly_label, 18),
+                ha="left", va="center", fontsize=6.8, color=line_color,
+            )
 
     def draw_coverage_track(
         self, ax, reads: List[AlignedRead], start: int, end: int
@@ -1072,7 +1294,7 @@ class AlignmentRenderer:
         relative_start = clamped_start / contig_length
         relative_width = max((clamped_end - clamped_start) / contig_length, 0.0)
         # Base-pair windows on chromosome-scale bars would otherwise disappear.
-        marker_width = max(relative_width * bar_width, 0.004)
+        marker_width = max(relative_width * bar_width, bar_width * 0.004)
         marker_center = bar_x + (relative_start + relative_width / 2) * bar_width
         marker_x = min(max(marker_center - marker_width / 2, bar_x), bar_x + bar_width - marker_width)
         ax.add_patch(Rectangle(
@@ -1089,12 +1311,6 @@ class AlignmentRenderer:
             1.012, 0.5, f"{contig_length / 1_000_000:.1f} Mb",
             transform=ax.transAxes, ha="left", va="center", fontsize=6.5,
             color=self.visual_colors["secondary_text"], clip_on=False,
-        )
-        ax.text(
-            marker_x + marker_width / 2, 0.93, "window",
-            transform=chromosome_transform,
-            ha="center", va="bottom", fontsize=5.5, color=self.visual_colors["ideogram_window"],
-            clip_on=False,
         )
 
     def draw_annotation_track(
@@ -1575,10 +1791,6 @@ class AlignmentRenderer:
                     fontsize=7, color=color, fontweight="bold", zorder=3,
                     clip_on=True,
                 )
-        ax.text(
-            0.005, 0.98, "reference", transform=ax.transAxes,
-            fontsize=7, color=self.visual_colors["secondary_text"], va="top", zorder=4,
-        )
 
     def draw_legends(
         self, fig, fig_height: float, plot_left: float = 0.05,
@@ -1593,7 +1805,7 @@ class AlignmentRenderer:
                 Line2D([0], [0], color=self.visual_colors["secondary_text"], lw=1.0, label="Mate link")
             )
         event_handles = [
-            Patch(facecolor=self.alignment_colors["small_insert"], edgecolor="none", label="Insertion"),
+            Patch(facecolor=self.visual_colors["insertion"], edgecolor="none", label="Insertion"),
             Line2D([0], [0], color=self.visual_colors["deletion"], lw=1.5, label="Deletion"),
         ]
         insert_size_handles = []
@@ -1614,10 +1826,21 @@ class AlignmentRenderer:
                     label=PAIR_CATEGORY_LABELS["interchrom"],
                 ))
             elif self.interchrom_mate_colors:
-                for mate_chrom, mate_color in self.interchrom_mate_colors.items():
+                mate_chromosomes = sorted(self.interchrom_mate_colors.items())
+                if len(mate_chromosomes) <= MAX_EXPLICIT_MATE_CHROMOSOMES:
+                    for mate_chrom, mate_color in mate_chromosomes:
+                        pair_geometry_handles.append(Patch(
+                            facecolor=mate_color, edgecolor="none",
+                            label=f"Mate {mate_chrom}",
+                        ))
+                else:
+                    # Preserve mate-chromosome colouring in the reads, but keep
+                    # rearrangement-heavy legends to one bounded summary item.
                     pair_geometry_handles.append(Patch(
-                        facecolor=mate_color, edgecolor="none",
-                        label=f"Mate {mate_chrom}",
+                        facecolor=mate_chromosomes[0][1], edgecolor="none",
+                        label=(
+                            f"Inter-chromosomal ({len(mate_chromosomes)} chromosomes)"
+                        ),
                     ))
             else:
                 pair_geometry_handles.append(Patch(
@@ -1627,6 +1850,7 @@ class AlignmentRenderer:
                     ),
                     edgecolor="none", label="Inter-chromosomal (mate colour)",
                 ))
+            alignment_handles.extend(pair_geometry_handles)
         haplotype_handles = []
         if self.haplotype_view in ("color", "split"):
             haplotype_handles = [
@@ -1649,15 +1873,16 @@ class AlignmentRenderer:
         legend_ax.set_ylim(0, 1)
         legend_ax.set_axis_off()
 
+        alignment_columns = 3 if pair_geometry_handles else 1
+        alignment_weight = 3.35 if pair_geometry_handles else 1.25
         groups = [
-            ("Alignment", alignment_handles, 1, 1.25),
+            ("Alignment", alignment_handles, alignment_columns, alignment_weight),
             ("Read events", event_handles, 1, 1.00),
         ]
         if haplotype_handles:
             groups.append(("Haplotype", haplotype_handles, 2, 1.35))
         elif insert_size_handles:
             groups.append(("Insert size", insert_size_handles, 1, 1.05))
-            groups.append(("Pair geometry", pair_geometry_handles, 2, 2.10))
         groups.append(("Base identity", base_handles, 2, 1.00))
 
         positioned_groups = []
@@ -1755,6 +1980,7 @@ class AlignmentRenderer:
         genomic_tracks: Optional[List[LoadedAnnotationTrack]] = None,
         contig_length: Optional[int] = None,
         cytobands: Optional[List[Cytoband]] = None,
+        assembly_label: Optional[str] = None,
     ) -> None:
         """Stack several BAMs' snapshots in one figure, sharing one genomic
         x-axis - the comparison view for "does aligner A produce
@@ -1822,20 +2048,24 @@ class AlignmentRenderer:
             for spine in ("top", "right", "left"):
                 ax.spines[spine].set_visible(False)
             ax.spines["bottom"].set_visible(False)
-            ax.tick_params(left=False, labelleft=False)
+            ax.tick_params(
+                left=False, labelleft=False, bottom=False, top=False,
+                labelbottom=False, labeltop=False,
+            )
 
         tick_positions = nice_tick_positions(window_start, window_end)
 
+        title_x, title_ha = self.figure_title_position()
         fig.text(
-            0.01, 1 - 0.06 / fig_height,
+            title_x, 1 - 0.06 / fig_height,
             f"{chrom}:{window_start + 1:,}-{window_end:,} ({span:,} bp)",
-            fontsize=10.5, color=self.visual_colors["primary_text"], fontweight="bold", va="top", ha="left",
+            fontsize=10.5, color=self.visual_colors["primary_text"], fontweight="bold", va="top", ha=title_ha,
         )
         if suptitle:
             fig.text(
-                0.01, 1 - 0.34 / fig_height,
+                title_x, 1 - 0.34 / fig_height,
                 ellipsize(suptitle, max(30, int(self.fig_width * 15))),
-                fontsize=8.5, color=self.visual_colors["secondary_text"], va="top", ha="left",
+                fontsize=8.5, color=self.visual_colors["secondary_text"], va="top", ha=title_ha,
             )
 
         if "ideogram" in ax_by_track:
@@ -1857,11 +2087,12 @@ class AlignmentRenderer:
 
         for track in tracks:
             if track != "ideogram" and not track.startswith("panel_header_"):
-                for tick in tick_positions:
-                    ax_by_track[track].axvline(
-                        tick, color=self.visual_colors["gridline"],
-                        lw=self.styles["grid_line_width"], zorder=0,
-                    )
+                self.draw_background_grid(
+                    ax_by_track[track], tick_positions, window_start, window_end
+                )
+                self.draw_highlights(
+                    ax_by_track[track], chrom, window_start, window_end
+                )
 
         for i, panel in enumerate(panels):
             rows = panel["rows"]
@@ -1946,12 +2177,23 @@ class AlignmentRenderer:
         fig.subplots_adjust(left=plot_left, right=plot_right,
                             top=1 - top_margin_in / fig_height,
                             bottom=bottom_margin_in / fig_height)
-        legends = self.draw_legends(fig, fig_height, plot_left, plot_right)
-        self.separate_legend_from_plots(fig, axes, legends)
+        self.draw_scale_bar(
+            fig, fig_height, plot_left, plot_right, span, assembly_label,
+            offset_from_top_in=0.59,
+        )
+        if self.show_legend:
+            legends = self.draw_legends(fig, fig_height, plot_left, plot_right)
+            self.separate_legend_from_plots(fig, axes, legends)
         fig.savefig(out_path, dpi=self.dpi)
         plt.close(fig)
 
-    def render_loci(self, panels: List[dict], out_path: str, suptitle: str = "") -> None:
+    def render_loci(
+        self,
+        panels: List[dict],
+        out_path: str,
+        suptitle: str = "",
+        assembly_label: Optional[str] = None,
+    ) -> None:
         """Render two independently scaled genomic loci as adjacent panels.
 
         Unlike :meth:`render_multi`, which stacks BAMs over one shared locus,
@@ -2037,9 +2279,10 @@ class AlignmentRenderer:
         )
 
         if suptitle:
-            fig.text(0.01, 0.995, suptitle, fontsize=10.5,
+            title_x, title_ha = self.figure_title_position()
+            fig.text(title_x, 0.995, suptitle, fontsize=10.5,
                      color=self.visual_colors["primary_text"],
-                     fontweight="bold", va="top", ha="left")
+                     fontweight="bold", va="top", ha=title_ha)
 
         for panel_idx, panel in enumerate(panels):
             chrom = panel["chrom"]
@@ -2096,11 +2339,12 @@ class AlignmentRenderer:
 
             for track in tracks:
                 if track not in ("panel_header", "ideogram"):
-                    for tick in ticks:
-                        axes_by_track[track].axvline(
-                            tick, color=self.visual_colors["gridline"],
-                            lw=self.styles["grid_line_width"], zorder=0,
-                        )
+                    self.draw_background_grid(
+                        axes_by_track[track], ticks, start, end
+                    )
+                    self.draw_highlights(
+                        axes_by_track[track], chrom, start, end
+                    )
 
             if show_ref_track:
                 ref_ax = axes_by_track["reference"]
@@ -2182,11 +2426,20 @@ class AlignmentRenderer:
         fig.subplots_adjust(left=plot_left, right=plot_right,
                             top=1 - top_margin_in / fig_height,
                             bottom=bottom_margin_in / fig_height)
-        legends = self.draw_legends(fig, fig_height, plot_left, plot_right)
-        plot_axes = []
-        for row in axes:
-            plot_axes.extend(row)
-        self.separate_legend_from_plots(fig, plot_axes, legends)
+        for panel_idx, panel in enumerate(panels):
+            panel_bounds = axes[0][panel_idx].get_position()
+            self.draw_scale_bar(
+                fig, fig_height, panel_bounds.x0, panel_bounds.x1,
+                panel["end"] - panel["start"],
+                assembly_label if panel_idx == len(panels) - 1 else None,
+                offset_from_top_in=0.40,
+            )
+        if self.show_legend:
+            legends = self.draw_legends(fig, fig_height, plot_left, plot_right)
+            plot_axes = []
+            for row in axes:
+                plot_axes.extend(row)
+            self.separate_legend_from_plots(fig, plot_axes, legends)
         fig.savefig(out_path, dpi=self.dpi)
         plt.close(fig)
 
@@ -2297,6 +2550,15 @@ class AlignmentRenderer:
     def draw_read(self, ax, read: AlignedRead, y0: float, h: float, render_base_detail: bool) -> None:
         base_fill, alpha = self.read_style(read)
         squished = self.display_mode == "squish"
+        axis_span = abs(ax.get_xlim()[1] - ax.get_xlim()[0])
+        pixels_per_base = (
+            ax.get_window_extent().width / axis_span if axis_span > 0 else 0
+        )
+        show_softclip_letters = (
+            render_base_detail
+            and self.display_mode == "expand"
+            and pixels_per_base >= self.styles["softclip_base_letter_min_px"]
+        )
         edge_width = (
             self.styles["squish_alignment_edge_width"]
             if squished else self.styles["alignment_edge_width"]
@@ -2339,10 +2601,21 @@ class AlignmentRenderer:
                     ax.text(blk.ref_pos + blk.length / 2, y0 + h / 2, f"{blk.length}",
                             fontsize=5.5, color=color, ha="center", va="bottom", zorder=4)
             elif blk.op == "I":
-                width = 0.4
-                insertion_color = self.alignment_colors["small_insert"]
+                width = self.styles["insertion_marker_width_bp"]
+                insertion_color = self.visual_colors["insertion"]
                 ax.add_patch(Rectangle((blk.ref_pos - width / 2, y0), width, h, facecolor=insertion_color,
                                         edgecolor="none", linewidth=0, zorder=5))
+                if (
+                    self.display_mode == "expand"
+                    and pixels_per_base * width >= self.styles["insertion_symbol_min_px"]
+                ):
+                    ax.text(
+                        blk.ref_pos, y0 + h / 2, "I",
+                        fontsize=self.styles["insertion_symbol_size"],
+                        color=self.visual_colors["contrast_edge"],
+                        fontweight="bold", ha="center", va="center",
+                        clip_on=True, zorder=8,
+                    )
                 if self.show_indel_lengths and not squished and blk.length >= 3:
                     ax.text(blk.ref_pos, y0, f"+{blk.length}", fontsize=5.5, color=insertion_color,
                             ha="center", va="top", zorder=6)
@@ -2359,9 +2632,25 @@ class AlignmentRenderer:
                 if render_base_detail and read.query_sequence:
                     for offset in range(blk.length):
                         cbase = read.query_sequence[blk.query_pos + offset].upper()
-                        ax.add_patch(Rectangle((x0 + offset, y0), 1, h,
-                                                facecolor=self.base_colors.get(cbase, self.base_colors["N"]),
-                                                alpha=alpha, edgecolor="none", zorder=2))
+                        cell_x = x0 + offset
+                        cell_color = (
+                            base_fill if show_softclip_letters
+                            else self.base_colors.get(cbase, self.base_colors["N"])
+                        )
+                        ax.add_patch(Rectangle(
+                            (cell_x, y0), 1, h,
+                            facecolor=cell_color,
+                            alpha=alpha, edgecolor="none", zorder=2,
+                        ))
+                        if show_softclip_letters:
+                            ax.text(
+                                cell_x + 0.5, y0 + h / 2, cbase,
+                                ha="center", va="center",
+                                fontsize=self.styles["softclip_base_letter_size"],
+                                color=self.base_colors.get(cbase, self.base_colors["N"]),
+                                fontweight="bold",
+                                clip_on=True, zorder=8,
+                            )
                 else:
                     ax.add_patch(Rectangle(
                         (x0, y0), blk.length, h,

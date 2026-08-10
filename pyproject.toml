@@ -35,9 +35,9 @@ test = ["pytest>=7.0"]
 locus-snap = "locus_snap.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/GENCARDIO/simple_bam_snap"
-Repository = "https://github.com/GENCARDIO/simple_bam_snap"
-Issues = "https://github.com/GENCARDIO/simple_bam_snap/issues"
+Homepage = "https://github.com/GENCARDIO/LocusSnap"
+Repository = "https://github.com/GENCARDIO/LocusSnap"
+Issues = "https://github.com/GENCARDIO/LocusSnap/issues"
 
 [tool.setuptools.packages.find]
 include = ["locus_snap*"]

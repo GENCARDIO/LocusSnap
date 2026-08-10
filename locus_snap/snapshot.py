@@ -27,6 +27,7 @@ from locus_snap.render import (
     AlignmentRenderer,
     DEFAULT_COVERAGE_VAF_THRESHOLD,
     DEFAULT_MAX_REFERENCE_SPAN,
+    HighlightRegion,
 )
 
 OUTPUT_FORMATS = ("png", "svg", "svgz", "pdf", "jpg", "jpeg", "tif", "tiff", "webp")
@@ -87,6 +88,7 @@ class BamSnapshot:
         include_duplicates: bool = False,
         max_rows: Optional[int] = None,
         show_alignments: bool = True,
+        show_legend: bool = True,
         show_coverage: bool = True,
         annotate_gap: bool = True,
         fig_width: float = 14.0,
@@ -126,6 +128,11 @@ class BamSnapshot:
         haplotype_tag: str = "HP",
         phase_set_tag: str = "PS",
         output_format: Optional[str] = None,
+        grid_mode: str = "major",
+        highlight_regions: Optional[List[HighlightRegion]] = None,
+        highlight_color: str = "#ffd54f",
+        highlight_alpha: float = 0.20,
+        title_align: str = "left",
     ):
         self.bam = bam
         self.chrom = chrom
@@ -145,6 +152,12 @@ class BamSnapshot:
         self.include_duplicates = include_duplicates
         self.max_rows = max_rows
         self.show_alignments = show_alignments
+        self.show_legend = show_legend
+        self.grid_mode = grid_mode
+        self.highlight_regions = list(highlight_regions or [])
+        self.highlight_color = highlight_color
+        self.highlight_alpha = highlight_alpha
+        self.title_align = title_align
         self.show_coverage = show_coverage
         self.annotate_gap = annotate_gap
         self.fig_width = fig_width
@@ -276,6 +289,12 @@ class BamSnapshot:
         renderer = AlignmentRenderer(
             fig_width=self.fig_width, dpi=self.dpi,
             show_alignments=self.show_alignments,
+            show_legend=self.show_legend,
+            grid_mode=self.grid_mode,
+            highlight_regions=self.highlight_regions,
+            highlight_color=self.highlight_color,
+            highlight_alpha=self.highlight_alpha,
+            title_align=self.title_align,
             show_coverage=self.show_coverage, annotate_gap=self.annotate_gap,
             pair_colors=self.pair_colors, shade_by_mapq=self.shade_by_mapq, mapq_cap=self.mapq_cap,
             alignment_colors=self.alignment_colors,
@@ -428,6 +447,7 @@ class BamSnapshot:
                     f"haplotypes={self.haplotype_view}, "
                     f"sort_by={sort_label} ({'desc' if self.descending else 'asc'})"
                 ),
+                assembly_label=self.cytoband_label,
             )
         else:
             renderer.render(
@@ -438,6 +458,7 @@ class BamSnapshot:
                 genomic_tracks=genomic_tracks,
                 contig_length=self.contig_lengths.get(self.chrom),
                 cytobands=bands_for_chrom(self.cytobands, self.chrom),
+                assembly_label=self.cytoband_label,
             )
 
         self.summary = summarize(
@@ -469,6 +490,7 @@ def compare_snapshots(
     include_duplicates: bool = False,
     max_rows: Optional[int] = None,
     show_coverage: bool = True,
+    show_legend: bool = True,
     annotate_gap: bool = True,
     fig_width: float = 14.0,
     dpi: int = 150,
@@ -508,6 +530,11 @@ def compare_snapshots(
     additional_bams: Optional[List[str]] = None,
     additional_labels: Optional[List[str]] = None,
     companion_vcfs: Optional[List[Optional[str]]] = None,
+    grid_mode: str = "major",
+    highlight_regions: Optional[List[HighlightRegion]] = None,
+    highlight_color: str = "#ffd54f",
+    highlight_alpha: float = 0.20,
+    title_align: str = "left",
 ) -> tuple[str, str]:
     """Render two or more BAMs as sample panels sharing one genomic x-axis."""
     os.makedirs(output_dir, exist_ok=True)
@@ -536,12 +563,13 @@ def compare_snapshots(
     reference_base = reference.base_at(base_position) if base_position is not None else None
     with pysam.AlignmentFile(bam1, "rb") as bam_file:
         contig_lengths = dict(zip(bam_file.references, bam_file.lengths))
-    cytobands = (
-        resolve_cytobands(
+    cytoband_label = None
+    if show_ideogram:
+        cytobands, cytoband_label = resolve_cytobands(
             contig_lengths, genome=genome, custom_path=cytoband_file
-        )[0]
-        if show_ideogram else {}
-    )
+        )
+    else:
+        cytobands = {}
     genomic_tracks = []
     for source in annotation_sources or []:
         genomic_tracks.append(source.fetch(chrom, start, end))
@@ -612,7 +640,12 @@ def compare_snapshots(
     )
 
     renderer = AlignmentRenderer(
-        fig_width=fig_width, dpi=dpi, show_coverage=show_coverage, annotate_gap=annotate_gap,
+        fig_width=fig_width, dpi=dpi, show_coverage=show_coverage,
+        show_legend=show_legend, grid_mode=grid_mode, annotate_gap=annotate_gap,
+        highlight_regions=highlight_regions,
+        highlight_color=highlight_color,
+        highlight_alpha=highlight_alpha,
+        title_align=title_align,
         pair_colors=pair_colors, shade_by_mapq=shade_by_mapq, mapq_cap=mapq_cap,
         alignment_colors=alignment_colors,
         visual_config=visual_config,
@@ -647,6 +680,7 @@ def compare_snapshots(
         genomic_tracks=genomic_tracks,
         contig_length=contig_lengths.get(chrom),
         cytobands=bands_for_chrom(cytobands, chrom),
+        assembly_label=cytoband_label,
     )
 
     return out_path, format_summary_table(summaries)

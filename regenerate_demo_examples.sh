@@ -11,6 +11,21 @@ python3 generate_demo_data.py
 
 python3 -m locus_snap \
   --bam test/test.bam \
+  --sample_label 'Primary locus with inferred discordant-mate window' \
+  --region chr9:101867481-101867620 \
+  --mate_view \
+  --mate_window_source discordant \
+  --layout expand \
+  --display_mode squish \
+  --max_alignment_depth 0 \
+  --refseq none \
+  --output_dir out \
+  --output_name 06_mate_view_discordant \
+  --fig_width 14 \
+  --dpi 120
+
+python3 -m locus_snap \
+  --bam test/test.bam \
   --region chr9:101867481-101867620 \
   --custom_track 'out/demo_data/annotations/demo_regions.bed,bed,Candidate regions,#000000,pack,0.42' \
   --custom_track 'out/demo_data/annotations/demo_genes.gtf,gtf,GENCODE genes,#17217a,pack,0.72' \
@@ -24,16 +39,17 @@ python3 -m locus_snap \
 
 python3 -m locus_snap \
   --bam test/test.bam \
+  --sample_label 'Visible mates linked on shared rows' \
   --region chr9:101867481-101867620 \
-  --track out/demo_data/variants/demo_variants.vcf.gz \
-  --track_label 'Expanded variants (n=12)' \
-  --track_display pack \
-  --display_mode collapse \
+  --view_as_pairs \
+  --layout pack \
+  --display_mode expand \
+  --max_alignment_depth 0 \
   --refseq none \
   --output_dir out \
-  --output_name 14_vcf_track \
-  --fig_width 12 \
-  --dpi 140
+  --output_name 15_view_as_pairs \
+  --fig_width 14 \
+  --dpi 120
 
 python3 -m locus_snap \
   --bam out/demo_data/alignments/demo_tumour.bam \
@@ -50,28 +66,23 @@ python3 -m locus_snap \
   --dpi 140
 
 python3 -m locus_snap \
-  --bam test/test.bam \
-  --region chr9:101867481-101867620 \
+  --bam out/demo_data/alignments/demo_cnv_tumour.bam \
+  --sample_label 'Tumour · 75% purity · 16,000 reads · CN1 loss and CN3 gain' \
+  --fasta out/demo_data/reference/demo_cnv_reference.fa \
+  --region chrCNV:1-80000 \
+  --custom_track 'out/demo_data/annotations/demo_cnv_states.bed,bed,Copy-number state,#333333,pack,0.42' \
   --track out/demo_data/annotations/demo_cnv.seg \
-  --track_label 'Tumour CNV (7 segments)' \
-  --display_mode collapse \
-  --refseq none \
-  --output_dir out \
-  --output_name 17_cnv_seg_track \
-  --fig_width 13 \
-  --dpi 140
-
-python3 -m locus_snap \
-  --bam out/demo_data/alignments/demo_tumour.bam \
-  --fasta out/demo_data/reference/demo_reference.fa \
-  --region chrDemo:81-180 \
-  --track out/demo_data/annotations/demo_cnv.seg \
-  --track_label 'Tumour CNV' \
+  --track_label 'Tumour CNV · purity-adjusted log2 ratio' \
   --baf_vcf out/demo_data/variants/demo_baf.vcf.gz \
   --baf_sample Tumour \
-  --baf_track_label 'Tumour BAF / LOH (n=20)' \
+  --baf_track_label 'Tumour BAF · CN1 loss: 0.20/0.80 · CN3 gain: 0.36/0.64' \
   --display_mode squish \
   --layout pack \
+  --no_alignments \
+  --grid_mode bands \
+  --max_alignment_depth 0 \
+  --coverage_vaf_threshold 0.12 \
+  --min_baseq 20 \
   --genome none \
   --refseq none \
   --output_dir out \
@@ -95,6 +106,7 @@ python3 -m locus_snap \
 
 python3 -m locus_snap \
   --bam out/demo_data/alignments/demo_tumour.bam \
+  --sample_label 'Tumour reads grouped by nucleotide at the selected SNV' \
   --fasta out/demo_data/reference/demo_reference.fa \
   --region chrDemo:81-180 \
   --layout expand \
@@ -171,20 +183,6 @@ python3 -m locus_snap \
 python3 -m locus_snap \
   --bam test/test.bam \
   --region chr9:101867481-101867620 \
-  --config out/demo_data/config/demo_track_heights.yaml \
-  --custom_track 'out/demo_data/annotations/demo_regions.bed,bed,Regions,#000000,pack,0.30' \
-  --custom_track 'out/demo_data/annotations/demo_genes.gtf,gtf,Genes,#17217a,pack,0.78' \
-  --custom_track 'out/demo_data/variants/demo_variants.vcf.gz,vcf,Variants (n=12),#7a1f5c,pack,0.45' \
-  --display_mode squish \
-  --refseq none \
-  --output_dir out \
-  --output_name 29_custom_track_heights \
-  --fig_width 14 \
-  --dpi 150
-
-python3 -m locus_snap \
-  --bam test/test.bam \
-  --region chr9:101867481-101867620 \
   --output_dir out \
   --output_name 30_default_refseq_isoforms \
   --fig_width 14 \
@@ -211,4 +209,45 @@ python3 -m locus_snap \
   --fig_width 16 \
   --dpi 150
 
-printf '%s\n' 'Regenerated expanded demo figures in out/'
+python3 -m locus_snap \
+  --bam test/test.bam \
+  --sample_label 'Close zoom · soft-clipped sequence shown base by base' \
+  --region chr9:101867541-101867580 \
+  --config out/demo_data/config/demo_softclip_zoom.yaml \
+  --only softclip \
+  --min_softclip 1 \
+  --layout expand \
+  --display_mode expand \
+  --sort_by start \
+  --sort_order asc \
+  --max_alignment_depth 0 \
+  --no_coverage \
+  --no_ideogram \
+  --refseq none \
+  --output_dir out \
+  --output_name 32_close_zoom_softclipped_bases \
+  --fig_width 10 \
+  --dpi 150
+
+python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_insertions.bam \
+  --sample_label 'Close zoom · short insertions marked at their breakpoint' \
+  --fasta out/demo_data/reference/demo_reference.fa \
+  --region chrDemo:101-140 \
+  --config out/demo_data/config/demo_softclip_zoom.yaml \
+  --only gapped \
+  --layout expand \
+  --display_mode expand \
+  --sort_by start \
+  --sort_order asc \
+  --max_alignment_depth 0 \
+  --no_annotate \
+  --no_coverage \
+  --no_ideogram \
+  --refseq none \
+  --output_dir out \
+  --output_name 33_close_zoom_insertions \
+  --fig_width 10 \
+  --dpi 150
+
+printf '%s\n' 'Regenerated the fourteen curated README figures in out/'

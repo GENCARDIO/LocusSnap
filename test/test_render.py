@@ -15,6 +15,7 @@ from locus_snap.cytobands import Cytoband
 from locus_snap.read_model import CigarBlock
 from locus_snap.render import (
     AlignmentRenderer,
+    HighlightRegion,
     compute_coverage,
     compute_binned_coverage,
     compute_feature_density,
@@ -23,8 +24,10 @@ from locus_snap.render import (
     compute_snv_counts,
     compute_splice_junctions,
     ellipsize,
+    format_scale_length,
     genomic_tick_labels,
     haplotype_color,
+    nice_scale_length,
 )
 
 
@@ -38,6 +41,199 @@ def test_feature_density_counts_interval_overlap_per_bin():
 
     assert positions == pytest.approx([2.5, 7.5, 12.5, 17.5])
     assert densities == [1, 2, 1, 0]
+
+
+@pytest.mark.parametrize(
+    "span, expected",
+    [(1, 1), (140, 100), (10_000, 5_000), (80_000, 50_000)],
+)
+def test_scale_ruler_uses_a_readable_125_length(span, expected):
+    assert nice_scale_length(span) == expected
+
+
+@pytest.mark.parametrize(
+    "length, expected",
+    [(100, "100 bp"), (10_000, "10 kb"), (2_000_000, "2 Mb")],
+)
+def test_scale_ruler_formats_genomic_units(length, expected):
+    assert format_scale_length(length) == expected
+
+
+def test_scale_ruler_draws_end_caps_and_assembly_label():
+    renderer = AlignmentRenderer()
+    fig = plt.figure(figsize=(10, 2))
+
+    renderer.draw_scale_bar(fig, 2, 0.10, 0.90, 140, "hg19")
+
+    assert len(fig.lines) == 3
+    horizontal = fig.lines[0]
+    assert horizontal.get_xdata() == pytest.approx([0.10, 0.10 + 0.80 * 100 / 140])
+    assert horizontal.get_ydata()[0] == pytest.approx(horizontal.get_ydata()[1])
+    assert {text.get_text() for text in fig.texts} == {"100 bp", "hg19"}
+    plt.close(fig)
+
+
+def test_background_grid_can_be_disabled():
+    renderer = AlignmentRenderer(grid_mode="none")
+    fig, ax = plt.subplots()
+
+    renderer.draw_background_grid(ax, [20, 40, 60, 80], 0, 100)
+
+    assert not ax.lines
+    assert not ax.patches
+    plt.close(fig)
+
+
+def test_major_minor_background_grid_subdivides_coordinate_intervals():
+    config = load_config()
+    config["styles"]["grid_minor_divisions"] = 2
+    renderer = AlignmentRenderer(grid_mode="major_minor", visual_config=config)
+    fig, ax = plt.subplots()
+
+    renderer.draw_background_grid(ax, [20, 40, 60, 80], 0, 100)
+
+    major_lines = [line for line in ax.lines if line.get_linestyle() == "-"]
+    minor_lines = [line for line in ax.lines if line.get_linestyle() == ":"]
+    assert [line.get_xdata()[0] for line in major_lines] == [20, 40, 60, 80]
+    assert [line.get_xdata()[0] for line in minor_lines] == [10, 30, 50, 70, 90]
+    plt.close(fig)
+
+
+def test_banded_background_alternates_between_major_boundaries():
+    renderer = AlignmentRenderer(grid_mode="bands")
+    fig, ax = plt.subplots()
+
+    renderer.draw_background_grid(ax, [20, 40, 60, 80], 0, 100)
+
+    assert len(ax.patches) == 3
+    assert len(ax.lines) == 4
+    assert [patch.get_x() for patch in ax.patches] == [0, 40, 80]
+    assert [patch.get_width() for patch in ax.patches] == [20, 20, 20]
+    plt.close(fig)
+
+
+def test_unknown_background_grid_mode_is_rejected():
+    with pytest.raises(ValueError, match="Unknown grid mode"):
+        AlignmentRenderer(grid_mode="graph-paper")
+
+
+def test_highlight_region_is_clipped_and_accepts_chr_aliases():
+    renderer = AlignmentRenderer(
+        highlight_regions=[
+            HighlightRegion("1", 90, 130),
+            HighlightRegion("chr2", 110, 150),
+        ],
+        highlight_color="#12abef",
+        highlight_alpha=0.35,
+    )
+    fig, ax = plt.subplots()
+
+    renderer.draw_highlights(ax, "chr1", 100, 200)
+
+    assert len(ax.patches) == 1
+    assert ax.patches[0].get_x() == pytest.approx(100)
+    assert ax.patches[0].get_width() == pytest.approx(30)
+    assert ax.patches[0].get_alpha() == pytest.approx(0.35)
+    assert to_hex(ax.patches[0].get_facecolor()) == "#12abef"
+    plt.close(fig)
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"highlight_color": "not-a-colour"}, "Invalid highlight color"),
+        ({"highlight_alpha": 0}, "Highlight alpha"),
+        ({"highlight_alpha": 1.1}, "Highlight alpha"),
+        ({"highlight_regions": [HighlightRegion("chr1", 20, 10)]},
+         "Highlight region end"),
+    ],
+)
+def test_invalid_highlight_settings_are_rejected(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        AlignmentRenderer(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "alignment, expected",
+    [
+        ("left", (0.01, "left")),
+        ("center", (0.50, "center")),
+        ("right", (0.99, "right")),
+    ],
+)
+def test_figure_title_position_matches_requested_alignment(alignment, expected):
+    renderer = AlignmentRenderer(title_align=alignment)
+
+    assert renderer.figure_title_position() == expected
+
+
+def test_unknown_figure_title_alignment_is_rejected():
+    with pytest.raises(ValueError, match="Unknown title alignment"):
+        AlignmentRenderer(title_align="floating")
+
+
+def test_render_aligns_region_title_and_subtitle_as_one_block(
+    tmp_path, monkeypatch,
+):
+    renderer = AlignmentRenderer(
+        title_align="right", show_coverage=False, show_ideogram=False,
+        show_legend=False, fig_width=4, dpi=40,
+    )
+    original_close = plt.close
+    monkeypatch.setattr(plt, "close", lambda *_args, **_kwargs: None)
+    output = tmp_path / "right-title.png"
+
+    renderer.render(
+        rows=[], chrom="chr1", window_start=100, window_end=200,
+        reference=None, out_path=str(output), title="Right-aligned subtitle",
+    )
+
+    fig = plt.gcf()
+    title = next(text for text in fig.texts if text.get_text().startswith("chr1:"))
+    subtitle = next(
+        text for text in fig.texts if text.get_text() == "Right-aligned subtitle"
+    )
+    assert title.get_position()[0] == pytest.approx(0.99)
+    assert subtitle.get_position()[0] == pytest.approx(0.99)
+    assert title.get_ha() == "right"
+    assert subtitle.get_ha() == "right"
+    original_close(fig)
+
+
+def test_highlight_is_applied_to_every_data_track_but_not_ideogram(
+    tmp_path, monkeypatch,
+):
+    item = AnnotationItem(100, 110)
+    track = LoadedAnnotationTrack(
+        "Regions", "bed", "#000000", [item], [[item]], "collapse"
+    )
+    renderer = AlignmentRenderer(
+        show_ideogram=True,
+        show_coverage=True,
+        show_alignments=True,
+        highlight_regions=[HighlightRegion("chr1", 100, 110)],
+        fig_width=4,
+        dpi=40,
+    )
+    calls = []
+    original = renderer.draw_highlights
+
+    def record_highlight(ax, chrom, start, end):
+        calls.append((ax, chrom, start, end))
+        original(ax, chrom, start, end)
+
+    monkeypatch.setattr(renderer, "draw_highlights", record_highlight)
+    output = tmp_path / "highlight-all-tracks.png"
+
+    renderer.render(
+        rows=[], chrom="chr1", window_start=90, window_end=120,
+        reference=None, out_path=str(output), genomic_tracks=[track],
+        contig_length=1_000, all_reads_for_coverage=[],
+    )
+
+    assert output.is_file()
+    assert len(calls) == 3  # annotation, coverage, and alignments
+    assert all(call[1:] == ("chr1", 90, 120) for call in calls)
 
 
 def test_peak_track_draws_signal_blocks_and_narrowpeak_summit():
@@ -103,6 +299,59 @@ def test_track_only_render_omits_alignment_rows_and_legend(tmp_path, monkeypatch
 
     assert output.is_file()
     assert renderer.legend_height_in == 0
+
+
+def test_no_legend_reclaims_legend_space_with_alignments_enabled(tmp_path, monkeypatch):
+    renderer = AlignmentRenderer(
+        show_legend=False, show_coverage=False, show_ideogram=False,
+        fig_width=4, dpi=40,
+    )
+
+    def reject_legend(*args, **kwargs):
+        raise AssertionError("The legend must not be drawn with show_legend=False")
+
+    monkeypatch.setattr(renderer, "draw_legends", reject_legend)
+    output = tmp_path / "no-legend.png"
+    renderer.render(
+        rows=[], chrom="chr1", window_start=90, window_end=120,
+        reference=None, out_path=str(output),
+    )
+
+    assert output.is_file()
+    assert renderer.show_alignments
+    assert not renderer.show_legend
+    assert renderer.legend_height_in == 0
+    assert renderer.legend_margin_in == pytest.approx(
+        renderer.legend_tick_clearance_in
+    )
+
+
+def test_only_bottom_coordinate_axis_has_x_tick_marks(tmp_path, monkeypatch):
+    renderer = AlignmentRenderer(
+        show_alignments=False, show_coverage=True, show_ideogram=True,
+        fig_width=4, dpi=40,
+    )
+    original_close = plt.close
+    monkeypatch.setattr(plt, "close", lambda *_args, **_kwargs: None)
+    output = tmp_path / "axis-ticks.png"
+
+    renderer.render(
+        rows=[], chrom="chr1", window_start=100, window_end=200,
+        reference=None, out_path=str(output), contig_length=1_000,
+        all_reads_for_coverage=[],
+    )
+
+    fig = plt.gcf()
+    ideogram_ax, coordinate_ax = fig.axes
+    assert not any(
+        tick.tick1line.get_visible() or tick.tick2line.get_visible()
+        for tick in ideogram_ax.xaxis.get_major_ticks()
+    )
+    assert any(
+        tick.tick1line.get_visible()
+        for tick in coordinate_ax.xaxis.get_major_ticks()
+    )
+    original_close(fig)
 
 
 def test_density_track_draws_compact_filled_histogram():
@@ -252,6 +501,80 @@ def test_squish_rows_are_shorter_than_expanded_rows():
     assert squished.styles["squish_alignment_edge_width"] == 0
 
 
+def test_close_zoom_labels_each_softclipped_nucleotide():
+    renderer = AlignmentRenderer(display_mode="expand", shade_by_mapq=False)
+    read = SimpleNamespace(
+        ref_start=100, ref_end=104, pair_category="normal", mate_chrom="chr1",
+        is_secondary=False, is_duplicate=False, mapq=60,
+        blocks=[
+            CigarBlock("S", 100, 0, 4),
+            CigarBlock("M", 100, 4, 4),
+            CigarBlock("S", 104, 8, 4),
+        ],
+        mismatches=[], query_sequence="ACGTAAAATGCA",
+    )
+    fig, ax = plt.subplots(figsize=(4, 1), dpi=100)
+    ax.set_xlim(90, 110)
+
+    renderer.draw_read(ax, read, y0=0.1, h=0.8, render_base_detail=True)
+
+    assert [text.get_text() for text in ax.texts] == list("ACGTTGCA")
+    assert [text.get_position()[0] for text in ax.texts] == pytest.approx(
+        [96.5, 97.5, 98.5, 99.5, 104.5, 105.5, 106.5, 107.5]
+    )
+    assert [to_hex(patch.get_facecolor()) for patch in ax.patches[:4]] == [
+        renderer.alignment_colors["normal"]
+    ] * 4
+    assert [to_hex(text.get_color()) for text in ax.texts[:4]] == [
+        DEFAULT_BASE_COLORS[base] for base in "ACGT"
+    ]
+    plt.close(fig)
+
+
+def test_wider_view_keeps_softclip_cells_but_omits_letters():
+    renderer = AlignmentRenderer(display_mode="expand", shade_by_mapq=False)
+    read = SimpleNamespace(
+        ref_start=100, ref_end=104, pair_category="normal", mate_chrom="chr1",
+        is_secondary=False, is_duplicate=False, mapq=60,
+        blocks=[CigarBlock("S", 100, 0, 4), CigarBlock("M", 100, 4, 4)],
+        mismatches=[], query_sequence="ACGTAAAA",
+    )
+    fig, ax = plt.subplots(figsize=(4, 1), dpi=100)
+    ax.set_xlim(0, 200)
+
+    renderer.draw_read(ax, read, y0=0.1, h=0.8, render_base_detail=True)
+
+    assert len(ax.patches) == 5
+    assert not ax.texts
+    plt.close(fig)
+
+
+def test_close_zoom_draws_igv_style_insertion_marker():
+    renderer = AlignmentRenderer(display_mode="expand", shade_by_mapq=False)
+    read = SimpleNamespace(
+        ref_start=100, ref_end=120, pair_category="normal", mate_chrom="chr1",
+        is_secondary=False, is_duplicate=False, mapq=60,
+        blocks=[
+            CigarBlock("M", 100, 0, 10),
+            CigarBlock("I", 110, 10, 4),
+            CigarBlock("M", 110, 14, 10),
+        ],
+        mismatches=[], query_sequence="A" * 24,
+    )
+    fig, ax = plt.subplots(figsize=(8, 1), dpi=100)
+    ax.set_xlim(90, 130)
+
+    renderer.draw_read(ax, read, y0=0.1, h=0.8, render_base_detail=True)
+
+    marker = ax.patches[1]
+    assert marker.get_x() + marker.get_width() / 2 == pytest.approx(110)
+    assert marker.get_width() == pytest.approx(0.4)
+    assert to_hex(marker.get_facecolor()) == DEFAULT_VISUAL_COLORS["insertion"]
+    assert [text.get_text() for text in ax.texts] == ["I"]
+    assert to_hex(ax.texts[0].get_color()) == DEFAULT_VISUAL_COLORS["contrast_edge"]
+    plt.close(fig)
+
+
 def test_squish_reads_hide_outlines_and_per_read_event_labels():
     renderer = AlignmentRenderer(display_mode="squish", shade_by_mapq=False)
     read = SimpleNamespace(
@@ -315,8 +638,8 @@ def test_indel_length_labels_are_opt_in():
         labelled_ax, read, y0=0.1, h=0.8, render_base_detail=False
     )
 
-    assert not default_ax.texts
-    assert [text.get_text() for text in labelled_ax.texts] == ["5", "+4"]
+    assert [text.get_text() for text in default_ax.texts] == ["I"]
+    assert [text.get_text() for text in labelled_ax.texts] == ["5", "I", "+4"]
     plt.close(fig)
 
 
@@ -405,23 +728,58 @@ def test_legend_clusters_related_terms_by_topic():
     legends = renderer.draw_legends(fig, fig_height=2)
 
     assert [legend.get_title().get_text() for legend in legends] == [
-        "Alignment", "Read events", "Insert size", "Pair geometry", "Base identity",
+        "Alignment", "Read events", "Insert size", "Base identity",
     ]
     assert [text.get_text() for text in legends[0].get_texts()] == [
-        "Normal / concordant",
+        "Normal / concordant", "FF (same strand)", "RR (same strand)",
+        "Reverted (RF)", "Inter-chromosomal (mate colour)",
     ]
     assert [text.get_text() for text in legends[1].get_texts()] == [
         "Insertion", "Deletion",
     ]
-    assert [text.get_text() for text in legends[4].get_texts()] == list("ACGT")
+    assert [text.get_text() for text in legends[3].get_texts()] == list("ACGT")
     legend_ax = fig.axes[-1]
-    assert len(legend_ax.patches) == 5
+    assert len(legend_ax.patches) == 4
     assert len(legend_ax.lines) == 0
     bounds = []
     for patch in legend_ax.patches:
         bounds.append((patch.get_x(), patch.get_x() + patch.get_width()))
     for left, right in zip(bounds, bounds[1:]):
         assert left[1] < right[0]
+    plt.close(fig)
+
+
+def test_alignment_legend_lists_at_most_two_mate_chromosomes_explicitly():
+    renderer = AlignmentRenderer(fig_width=14)
+    renderer.interchrom_mate_colors = {
+        "chr2": "#ce3d32",
+        "chr1": "#5050ff",
+    }
+    fig = plt.figure(figsize=(14, 2))
+
+    legends = renderer.draw_legends(fig, fig_height=2)
+
+    labels = [text.get_text() for text in legends[0].get_texts()]
+    assert labels[-2:] == ["Mate chr1", "Mate chr2"]
+    plt.close(fig)
+
+
+def test_alignment_legend_collapses_many_mate_chromosomes_to_one_entry():
+    renderer = AlignmentRenderer(fig_width=14)
+    renderer.interchrom_mate_colors = {
+        f"chr{chromosome}": f"#{chromosome:02x}55aa"
+        for chromosome in range(1, 9)
+    }
+    fig = plt.figure(figsize=(14, 2))
+
+    legends = renderer.draw_legends(fig, fig_height=2)
+
+    labels = [text.get_text() for text in legends[0].get_texts()]
+    assert labels == [
+        "Normal / concordant", "FF (same strand)", "RR (same strand)",
+        "Reverted (RF)", "Inter-chromosomal (8 chromosomes)",
+    ]
+    assert not any(label.startswith("Mate chr") for label in labels)
     plt.close(fig)
 
 
@@ -502,7 +860,7 @@ def test_small_window_reference_track_draws_coloured_base_cells_and_letters():
     renderer.draw_reference_track(ax, reference, 0, 4, available_width_in=4)
 
     assert len(ax.patches) == 4
-    assert [text.get_text() for text in ax.texts] == ["A", "C", "G", "T", "reference"]
+    assert [text.get_text() for text in ax.texts] == ["A", "C", "G", "T"]
     plt.close(fig)
 
 
@@ -615,7 +973,20 @@ def test_ideogram_marks_the_window_in_red():
     assert chromosome_bounds.x0 == pytest.approx(axes_bounds.x0)
     assert chromosome_bounds.x1 == pytest.approx(axes_bounds.x1)
     assert to_hex(ax.patches[1].get_facecolor()) == DEFAULT_VISUAL_COLORS["ideogram_window"]
-    assert {text.get_text() for text in ax.texts} == {"chr1", "0.0 Mb", "window"}
+    assert {text.get_text() for text in ax.texts} == {"chr1", "0.0 Mb"}
+    plt.close(fig)
+
+
+def test_ideogram_keeps_a_visible_marker_for_a_tiny_genomic_window():
+    renderer = AlignmentRenderer()
+    fig, ax = plt.subplots()
+    renderer.draw_ideogram(ax, "chr1", 100, 200, 250_000_000)
+
+    chromosome = ax.patches[0]
+    marker = ax.patches[-1]
+    assert marker.get_width() == pytest.approx(chromosome.get_width() * 0.004)
+    assert to_hex(marker.get_facecolor()) == DEFAULT_VISUAL_COLORS["ideogram_window"]
+    assert "window" not in {text.get_text() for text in ax.texts}
     plt.close(fig)
 
 
@@ -686,10 +1057,10 @@ def test_gene_orientation_arrows_use_readable_default_spacing_and_size():
     for line in ax.lines:
         if line.get_marker() == ">":
             arrows.append(line)
-    expected_maximum = int(ax.get_window_extent().width / 20)
+    expected_maximum = int(ax.get_window_extent().width / 28)
     assert 1 < len(arrows) <= expected_maximum
     assert all(
-        line.get_markersize() == pytest.approx(2.7) for line in arrows
+        line.get_markersize() == pytest.approx(3.1) for line in arrows
     )
     plt.close(fig)
 

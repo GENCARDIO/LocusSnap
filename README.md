@@ -2,8 +2,6 @@
 
 Create an IGV-like image from an indexed BAM without opening a genome browser.
 
-First version of this tool was extremely simple. Now, and aided by codex, it provides a fair amount of features (might rename the tool probably).
-
 ## Install
 
 ```bash
@@ -27,19 +25,18 @@ The result is `out/locus.png`.
 ### Run from a source checkout
 
 ```bash
-git clone https://github.com/GENCARDIO/simple_bam_snap.git LocusSnap
+git clone https://github.com/GENCARDIO/LocusSnap.git
 cd LocusSnap
 pip3 install -e .
 
-python3 -m locus_snap \
+python3 locus_snap.py \
   --bam sample.bam \
   --region chr9:101867481-101867620 \
   --output_dir out \
   --output_name locus
 ```
 
-The former `python3 simple_bam_snap.py ...` command remains available as a
-compatibility launcher.
+`python3 -m locus_snap ...` is equivalent when running from the repository.
 
 The BAM must be indexed. If it is not:
 
@@ -91,8 +88,8 @@ Click any preview for the full-resolution figure.
     </td>
     <td width="50%">
       <a href="out/18_variant_evidence_baf_loh.png"><img src="out/18_variant_evidence_baf_loh.png" alt="Copy-number segments with B-allele fractions and loss of heterozygosity"></a><br>
-      <strong>CNV with BAF/LOH</strong><br>
-      <sub>Copy-number segments integrated with heterozygous-variant evidence.</sub>
+      <strong>CNV with BAF/LOH and genomic bands</strong><br>
+      <sub>Alternating coordinate bands align purity-aware CN1 loss (BAF 0.20/0.80), CN3 gain (BAF 0.36/0.64), and their matching depth shifts.</sub>
     </td>
   </tr>
   <tr>
@@ -107,18 +104,53 @@ Click any preview for the full-resolution figure.
       <sub>Stacked BAM panels with sample-matched companion VCFs.</sub>
     </td>
   </tr>
+  <tr>
+    <td width="50%">
+      <a href="out/15_view_as_pairs.png"><img src="out/15_view_as_pairs.png" alt="Paired reads linked on shared alignment rows"></a><br>
+      <strong>View as pairs</strong><br>
+      <sub>Visible primary mates share rows and are connected across their genomic gap.</sub>
+    </td>
+    <td width="50%">
+      <a href="out/06_mate_view_discordant.png"><img src="out/06_mate_view_discordant.png" alt="Primary locus beside an inferred discordant-mate window"></a><br>
+      <strong>Two-locus mate window</strong><br>
+      <sub>The requested locus is shown beside the automatically inferred discordant-mate region.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <a href="out/22_sort_by_snv_base.png"><img src="out/22_sort_by_snv_base.png" alt="Reads grouped by their nucleotide at a selected SNV"></a><br>
+      <strong>Sort by SNV base</strong><br>
+      <sub>Alternative-allele reads are grouped and prioritized at the selected position.</sub>
+    </td>
+    <td width="50%">
+      <a href="out/11_custom_track_definitions.png"><img src="out/11_custom_track_definitions.png" alt="BED, GTF, and VCF tracks in one genomic snapshot"></a><br>
+      <strong>Mixed custom tracks</strong><br>
+      <sub>BED regions, transcript models, and VCF variants are composed in one figure.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <a href="out/32_close_zoom_softclipped_bases.png"><img src="out/32_close_zoom_softclipped_bases.png" alt="Close genomic zoom showing individual soft-clipped nucleotide letters"></a><br>
+      <strong>Soft-clipped bases at close zoom</strong><br>
+      <sub>A 40 bp expanded view retains each read's background while colouring the clipped A/C/G/T letters like IGV.</sub>
+    </td>
+    <td width="50%">
+      <a href="out/33_close_zoom_insertions.png"><img src="out/33_close_zoom_insertions.png" alt="Close genomic zoom showing purple insertion markers at a shared breakpoint"></a><br>
+      <strong>Insertions at close zoom</strong><br>
+      <sub>Short CIGAR insertions appear as narrow purple breakpoint markers with a white I, matching IGV.</sub>
+    </td>
+  </tr>
 </table>
 
-Additional examples: [true squish layout](out/02_squish_packed.png),
-[paired alignments](out/15_view_as_pairs.png),
-[two-locus mate view](out/06_mate_view_discordant.png), and
-[editable SVG output](out/25_vector_output.svg).
-
-The synthetic examples use expanded, deterministic datasets: 96 tumour, 72
-normal, 84 relapse, 300 METex14 RNA alignments, and 703 structural-variant
-alignments; 12 general VCF records; 20 BAF loci; 12 H3K27ac, 7 H3K27me3, and 24
-DNase peaks; and three 4 kb normalized CTCF signal profiles. Rendered figures
-remain directly under `out/`; their generated inputs are grouped by type:
+The synthetic examples use expanded, deterministic datasets: 240 tumour, 180
+normal, 210 relapse, 300 METex14 RNA alignments, 703 structural-variant
+alignments, and 16,000 reads across a purity-aware CNV locus; 12 general VCF
+records; 83 heterozygous BAF loci; 12 H3K27ac, 7 H3K27me3, and 24 DNase peaks;
+and three 4 kb normalized CTCF signal profiles. DNA cohorts include a sparse
+0.15% low-quality substitution-error model. The CNV cohort couples read depth,
+SEG log2 ratios, and BAF bands for diploid, single-copy-loss/LOH, and three-copy
+gain states. Rendered figures remain directly under `out/`; their generated
+inputs are grouped by type:
 
 ```text
 out/demo_data/
@@ -130,7 +162,8 @@ out/demo_data/
 └── variants/     # VCF and tabix indexes
 ```
 
-Rebuild the demo inputs, indexes, and affected figures with:
+Rebuild the demo inputs, indexes, and the twelve curated figures shown above
+with:
 
 ```bash
 bash regenerate_demo_examples.sh
@@ -160,12 +193,34 @@ possible.
 | Link visible mates | `--view_as_pairs` |
 | Two loci: region + inferred mate locus | `--mate_view` |
 | Only event-supporting reads | `--only discordant gapped split softclip` |
+| Hide the legend | `--no_legend` |
+| Hide the background grid | `--grid_mode none` |
+| Add coordinate subdivisions | `--grid_mode major_minor` |
+| Use alternating genomic bands | `--grid_mode bands` |
+| Highlight a genomic interval | `--highlight chr1:100100-100250 --highlight_color '#ffd54f'` |
+| Center the figure title | `--title_align center` |
 | Hide coverage | `--no_coverage` |
 | Hide chromosome overview | `--no_ideogram` |
 | Add a center guide | `--center_guide` |
 
 `display_mode` controls read height. `layout` controls row placement. They are
 independent.
+
+`--grid_mode` controls the genomic background consistently across alignment,
+coverage, annotation, multi-sample, and mate-window panels. The default is
+`major`. Grid colours, line styles, opacity, widths, band opacity, and the
+number of minor subdivisions can all be adjusted under `visual_colors` and
+`styles` in the YAML configuration.
+
+Use repeatable `--highlight chrom:start-end` intervals to shade selected loci
+through every data track. `--highlight_color` accepts Matplotlib colours and
+`--highlight_alpha` controls their shared opacity. Highlights also work in
+multi-sample and mate-window figures; in mate view, each interval is applied
+only to the panel with the matching chromosome.
+
+`--title_align left|center|right` positions the complete figure heading block,
+including its subtitle. It applies consistently to single-locus, multi-sample,
+and mate-window figures without moving individual track or panel labels.
 
 ## Common recipes
 
@@ -565,7 +620,8 @@ Supported formats: PNG, SVG, SVGZ, PDF, JPEG, TIFF, and WebP. Raster width is
 |---|---|
 | grey | normal/concordant |
 | red | unexpectedly large FR insert |
-| purple | unexpectedly small FR insert; also used for CIGAR insertions |
+| dark blue | unexpectedly small FR insert |
+| purple | CIGAR insertion marker |
 | teal / blue | FF/RR same-strand pair (IGV orientation colours) |
 | green | everted RF pair |
 | IGV chromosome colour | inter-chromosomal pair, keyed by the mate chromosome |
@@ -590,6 +646,12 @@ CIGAR insertion and deletion lengths are hidden by default. Show them with
 | `--layout pack\|expand` | packed rows or one sorted unit per row |
 | `--sort_by KEY` | `base`, `gap_length`, `mapq`, `start`, and more |
 | `--only TYPE [...]` | keep discordant, gapped, split, or soft-clipped reads |
+| `--no_legend` | hide legend cards and reclaim their space |
+| `--grid_mode MODE` | `none`, `major`, `major_minor`, or alternating `bands` |
+| `--highlight REGION` | shade a repeatable interval through every data track |
+| `--highlight_color COLOR` | colour shared by highlighted intervals |
+| `--highlight_alpha A` | highlight opacity in the range `(0, 1]` |
+| `--title_align ALIGN` | place the figure title at `left`, `center`, or `right` |
 | `--min_mapq N` | filter low-MAPQ reads |
 | `--max_alignment_depth N` | downsample displayed reads above N×; default 100 |
 | `--view_as_pairs` | link visible primary mates |

@@ -36,7 +36,11 @@ from locus_snap.read_model import ONLY_TYPES
 from locus_snap.refseq import (
     REFSEQ_LABELS, detect_human_assembly, ensure_refseq, normalize_assembly,
 )
-from locus_snap.render import DEFAULT_COVERAGE_VAF_THRESHOLD, DEFAULT_MAX_REFERENCE_SPAN
+from locus_snap.render import (
+    DEFAULT_COVERAGE_VAF_THRESHOLD,
+    DEFAULT_MAX_REFERENCE_SPAN,
+    HighlightRegion,
+)
 from locus_snap.snapshot import OUTPUT_FORMATS, BamSnapshot, compare_snapshots
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -45,6 +49,7 @@ log = logging.getLogger("locus_snap")
 REGION_RE = re.compile(r"^(?P<chrom>[\w.\-]+):(?P<start>[\d,]+)-(?P<end>[\d,]+)$")
 PREFERENCE_ALIASES = {
     "show_alignments": ("no_alignments", True),
+    "show_legend": ("no_legend", True),
     "show_coverage": ("no_coverage", True),
     "show_ideogram": ("no_ideogram", True),
     "pair_colors": ("no_pair_colors", True),
@@ -54,17 +59,18 @@ PREFERENCE_ALIASES = {
 }
 
 
-def parse_region(region: str, flank: int = 0):
+def parse_region(region: str, flank: int = 0, option: str = "--region"):
     match = REGION_RE.match(region.strip())
     if not match:
         raise ValueError(
-            f"Invalid --region '{region}'. Expected format chrom:start-end (e.g. chr9:101867500-101867650)."
+            f"Invalid {option} '{region}'. Expected format chrom:start-end "
+            "(e.g. chr9:101867500-101867650)."
         )
     chrom = match.group("chrom")
     start = int(match.group("start").replace(",", ""))
     end = int(match.group("end").replace(",", ""))
     if end <= start:
-        raise ValueError(f"--region end ({end}) must be greater than start ({start}).")
+        raise ValueError(f"{option} end ({end}) must be greater than start ({start}).")
     # user-facing coordinates are 1-based inclusive; internally we use 0-based half-open
     start0 = max(0, start - 1 - flank)
     end0 = end + flank
@@ -73,6 +79,7 @@ def parse_region(region: str, flank: int = 0):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
+        prog="locus-snap",
         description=(
             "LocusSnap: IGV-like genomic snapshots with sortable alignment layouts."
         ),
@@ -94,6 +101,23 @@ def build_parser() -> argparse.ArgumentParser:
               "this span; set to 0 to hide the track while retaining mismatch detection."),
     )
     parser.add_argument("--flank", type=int, default=0, help="Extra bp of context padded on each side of --region.")
+    parser.add_argument(
+        "--highlight", action="append", metavar="REGION",
+        help=("Shade a 1-based inclusive chrom:start-end interval through every data "
+              "track; repeat for multiple intervals."),
+    )
+    parser.add_argument(
+        "--highlight_color", default="#ffd54f", metavar="COLOR",
+        help="Matplotlib colour used for every --highlight span.",
+    )
+    parser.add_argument(
+        "--highlight_alpha", type=float, default=0.20, metavar="ALPHA",
+        help="Opacity of highlighted spans; must be greater than 0 and at most 1.",
+    )
+    parser.add_argument(
+        "--title_align", choices=["left", "center", "right"], default="left",
+        help="Horizontal alignment of the figure-level title and subtitle.",
+    )
 
     parser.add_argument("--output_dir", default=".", help="Output directory.")
     parser.add_argument(
@@ -194,6 +218,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--no_alignments", action="store_true",
         help=("Hide the BAM alignment rows and their legend, for track-only figures "
               "such as ChIP-seq signal profiles."),
+    )
+    parser.add_argument(
+        "--no_legend", action="store_true",
+        help="Hide the alignment legend and reclaim its reserved figure space.",
+    )
+    parser.add_argument(
+        "--grid_mode", choices=["none", "major", "major_minor", "bands"],
+        default="major",
+        help=("Genomic background: none, labelled major-coordinate lines, "
+              "major lines with subdivisions, or alternating coordinate bands."),
     )
     parser.add_argument(
         "--view_as_pairs", action="store_true",
@@ -447,6 +481,14 @@ def main(argv=None) -> int:
 
     try:
         chrom, start, end = parse_region(args.region, flank=args.flank)
+        highlight_regions = []
+        for value in args.highlight or []:
+            highlight_chrom, highlight_start, highlight_end = parse_region(
+                value, option="--highlight"
+            )
+            highlight_regions.append(HighlightRegion(
+                highlight_chrom, highlight_start, highlight_end
+            ))
     except ValueError as exc:
         log.error(str(exc))
         return 1
@@ -581,6 +623,12 @@ def main(argv=None) -> int:
         include_supplementary=not args.exclude_supplementary,
         include_duplicates=args.include_duplicates,
         max_rows=args.max_rows,
+        show_legend=not args.no_legend,
+        grid_mode=args.grid_mode,
+        highlight_regions=highlight_regions,
+        highlight_color=args.highlight_color,
+        highlight_alpha=args.highlight_alpha,
+        title_align=args.title_align,
         show_ideogram=not args.no_ideogram,
         show_center_guide=args.center_guide,
         genome=args.genome,

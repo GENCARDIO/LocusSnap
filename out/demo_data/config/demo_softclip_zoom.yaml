@@ -1,0 +1,5 @@
+styles:
+  row_height_in: 0.12
+  softclip_base_letter_size: 6.2
+  softclip_base_letter_min_px: 8.0
+  insertion_symbol_size: 6.2
