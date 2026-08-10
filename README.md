@@ -111,6 +111,13 @@ Click any preview for the full-resolution figure.
     </td>
   </tr>
   <tr>
+    <td colspan="2">
+      <a href="out/35_multi_sample_batch_report.png"><img src="out/35_multi_sample_batch_report.png" alt="Multi-sample batch report with a grouped variant index, per-sample metrics, and embedded comparison plots"></a><br>
+      <strong>Multi-sample batch report</strong><br>
+      <sub>BED/VCF candidates become an ordered, self-contained HTML review with shared-scale sample panels and changes versus the first BAM.</sub>
+    </td>
+  </tr>
+  <tr>
     <td width="50%">
       <a href="out/15_view_as_pairs.png"><img src="out/15_view_as_pairs.png" alt="Paired reads linked on shared alignment rows"></a><br>
       <strong>View as pairs</strong><br>
@@ -386,7 +393,8 @@ VCF. Each BAM keeps its own coverage, alignments, downsampling, and summary.
 
 ### Batch rendering and reports
 
-Render every region in a BED file with one command, using a single BAM:
+Render every region in a BED file with one command. Repeat `--bam` to make
+every output image a stacked, multi-sample comparison:
 
 ```text
 # candidates.bed  (BED3/BED4: chrom, start, end[, name])
@@ -396,17 +404,26 @@ chr1	100000	101000
 
 ```bash
 locus-snap \
-  --bam sample.bam \
+  --bam tumour.bam \
+  --bam normal.bam \
+  --bam relapse.bam \
+  --sample_label Tumour \
+  --sample_label Normal \
+  --sample_label Relapse \
   --batch_regions candidates.bed \
   --report \
+  --threads 4 \
   --output_dir out/candidates
 ```
 
 Each row renders to its own image, named from the optional 4th BED column (or
 `chrom_start_end` when omitted); `--flank`, `--display_mode`, `--track`, and
-every other single-region option still apply to every region. One bad region
-(e.g. a contig missing from the BAM) is logged and skipped rather than
-aborting the whole batch; the process exits non-zero if any region failed.
+the usual figure options still apply to every region. Multi-sample coverage
+panels share a y-scale within each locus, making depth changes directly
+comparable. `--threads N` renders independent regions in isolated worker
+processes while preserving BED/VCF order in the report. One bad region (e.g. a
+contig missing from a BAM) is logged and skipped rather than aborting the whole
+batch; the process exits non-zero if any region failed.
 
 `--batch_regions` also accepts a VCF/VCF.gz/BCF directly (picked by file
 extension) — one region per variant record, no BED needed:
@@ -432,13 +449,21 @@ Records with no ALT allele (e.g. gVCF reference blocks) are skipped.
 
 `--report` (optionally `--report NAME.html`) additionally writes one
 self-contained HTML file with every rendered image embedded inline, alongside
-a summary table of reads/gapped%/discordant%/soft-clipped per region — useful
-for reviewing a panel of candidate variants without opening each PNG. It
-requires `--batch_regions` and a browser-viewable `--output_format` (png,
+a grouped summary of reads/gapped%/discordant%/soft-clipped for every sample
+and region. Each region card also reports changes versus the first BAM (the
+baseline) in reads, gapped and discordant percentage points, and soft-clipped
+read count. This is useful for tumour/normal or longitudinal review without
+opening each image. The HTML is self-contained and can be shared as one file.
+It requires `--batch_regions` and a browser-viewable `--output_format` (png,
 jpg, jpeg, webp, or svg — not pdf/tiff/svgz).
 
-`--batch_regions` currently supports one `--bam` at a time and does not
-combine with `--sort_base_position` or `--metrics_tsv`.
+For a reproducible three-sample example, run `python3 generate_demo_data.py`
+and use `out/demo_data/annotations/demo_multi_sample_review.bed` with the
+demo tumour, normal, and relapse BAMs. `regenerate_demo_examples.sh` writes the
+finished report to `out/multi_sample_batch/35_multi_sample_batch_report.html`.
+
+`--batch_regions` does not combine with `--sort_base_position` or
+`--metrics_tsv`.
 
 ## Add genomic tracks
 
@@ -730,8 +755,9 @@ CIGAR insertion and deletion lengths are hidden by default. Show them with
 |---|---|
 | `--bam BAM` | indexed BAM or CRAM input; repeat for multiple samples |
 | `--region chr:start-end` | 1-based inclusive window |
-| `--batch_regions BED\|VCF` | render every region in a BED file, or every variant in a VCF (single BAM) |
-| `--report [NAME.html]` | self-contained HTML report for `--batch_regions` |
+| `--batch_regions BED\|VCF` | render every region/variant for one or more BAM samples |
+| `--report [NAME.html]` | self-contained, sample-aware HTML report for `--batch_regions` |
+| `--threads N` | render batch regions in parallel while retaining input order |
 | `--fasta FASTA` | reference bases, mismatches, and coverage VAF |
 | `--flank BP` | add context on both sides |
 | `--display_mode collapse\|expand\|squish` | read-track density |

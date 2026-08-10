@@ -26,6 +26,7 @@ def test_three_bams_render_with_matched_vcf_companion_tracks(tmp_path):
     write_companion(second_vcf, 101867540, "second-variant")
     write_companion(third_vcf, 101867590, "third-variant")
 
+    result_summaries = []
     output, summary = compare_snapshots(
         TEST_BAM,
         TEST_BAM,
@@ -44,6 +45,7 @@ def test_three_bams_render_with_matched_vcf_companion_tracks(tmp_path):
         max_rows=1,
         fig_width=7,
         dpi=40,
+        result_summaries=result_summaries,
     )
 
     svg = (tmp_path / "multi-sample.svg").read_text(encoding="utf-8")
@@ -57,3 +59,4 @@ def test_three_bams_render_with_matched_vcf_companion_tracks(tmp_path):
     assert "Tumour" in summary
     assert "Normal" in summary
     assert "Relapse" in summary
+    assert [item.label for item in result_summaries] == ["Tumour", "Normal", "Relapse"]

@@ -127,6 +127,30 @@ def test_write_html_report_embeds_images_and_lists_failures(tmp_path):
     assert "1 rendered, 1 failed" in content
 
 
+def test_write_html_report_groups_multiple_samples_and_shows_deltas(tmp_path):
+    image_path = tmp_path / "comparison.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-bytes")
+    tumour = _summary(n_reads=12, n_gapped=3, n_discordant=4, n_softclipped=5)
+    normal = _summary(n_reads=8, n_gapped=1, n_discordant=1, n_softclipped=2)
+    result = BatchResult(
+        region=BatchRegion(chrom="chr1", start=99, end=100, name="variant_a"),
+        output_path=str(image_path), summaries=[tumour, normal], summary=tumour,
+    )
+    report_path = tmp_path / "multi.html"
+
+    write_html_report(
+        [result], str(report_path), "png", sample_labels=["Tumour", "Normal"]
+    )
+    content = report_path.read_text(encoding="utf-8")
+
+    assert "colspan='4'>Tumour" in content
+    assert "colspan='4'>Normal" in content
+    assert "2 samples" in content
+    assert "&Delta; reads" in content
+    assert "-4" in content
+    assert "baseline" in content
+
+
 def test_write_html_report_rejects_non_browser_format(tmp_path):
     results = [BatchResult(region=BatchRegion(chrom="chr1", start=0, end=100, name="r"))]
     with pytest.raises(ValueError, match="browser-viewable"):
@@ -187,12 +211,46 @@ def test_report_without_batch_regions_is_rejected(tmp_path):
     assert rc == 1
 
 
-def test_batch_regions_rejects_multiple_bam(tmp_path):
-    bed = write_bed(tmp_path, "chr9\t101867480\t101867620\tsite_a\n")
+def test_batch_regions_renders_multiple_bams_in_parallel_and_reports_samples(tmp_path):
+    bed = write_bed(
+        tmp_path,
+        "chr9\t101867480\t101867620\tsite_a\n"
+        "chrZZZ\t1\t100\tbad_contig\n"
+        "chr9\t101867500\t101867560\tsite_b\n",
+    )
+    output_dir = tmp_path / "out"
     rc = main([
         "--bam", TEST_BAM,
         "--bam", TEST_BAM,
+        "--sample_label", "Tumour",
+        "--sample_label", "Normal",
         "--batch_regions", bed,
+        "--report",
+        "--threads", "2",
+        "--max_rows", "2",
+        "--no_coverage",
+        "--no_legend",
+        "--no_ideogram",
+        "--refseq", "none",
+        "--output_dir", str(output_dir),
+    ])
+
+    assert rc == 1
+    assert (output_dir / "site_a.png").is_file()
+    assert (output_dir / "site_b.png").is_file()
+    assert not (output_dir / "bad_contig.png").exists()
+    report = (output_dir / "report.html").read_text(encoding="utf-8")
+    assert "colspan='4'>Tumour" in report
+    assert "colspan='4'>Normal" in report
+    assert report.index("site_a") < report.index("bad_contig") < report.index("site_b")
+
+
+def test_batch_regions_rejects_non_positive_threads(tmp_path):
+    bed = write_bed(tmp_path, "chr9\t101867480\t101867620\tsite_a\n")
+    rc = main([
+        "--bam", TEST_BAM,
+        "--batch_regions", bed,
+        "--threads", "0",
         "--refseq", "none",
         "--output_dir", str(tmp_path),
     ])

@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import sys
+from concurrent.futures import ProcessPoolExecutor
 
 from locus_snap.annotations import (
     ANNOTATION_DISPLAY_MODES,
@@ -78,6 +79,65 @@ def parse_region(region: str, flank: int = 0, option: str = "--region"):
     return chrom, start0, end0
 
 
+def _render_batch_region(task: dict) -> BatchResult:
+    """Render one batch region in the current process or a worker process."""
+    region = task["region"]
+    bam_paths = task["bam_paths"]
+    sample_labels = task["sample_labels"]
+    companion_vcfs = task["companion_vcfs"]
+    common_kwargs = dict(task["common_kwargs"])
+    # Every region fetches its own annotation data. Keep the task's source list
+    # isolated because a single-sample VCF companion is added locally.
+    common_kwargs["annotation_sources"] = list(
+        common_kwargs.get("annotation_sources") or []
+    )
+
+    try:
+        if len(bam_paths) == 1:
+            if companion_vcfs[0]:
+                common_kwargs["annotation_sources"].append(AnnotationSource(
+                    companion_vcfs[0], label=f"{sample_labels[0]} variants", kind="vcf",
+                    display_mode="collapse",
+                    track_colors=common_kwargs["visual_config"]["track_colors"],
+                ))
+            snap = BamSnapshot(
+                bam=bam_paths[0], chrom=region.chrom, start=region.start, end=region.end,
+                fasta=task["fasta"], output_dir=task["output_dir"],
+                output_name=region.name, output_format=task["output_format"],
+                label=sample_labels[0], mate_view=task["mate_view"],
+                mate_window_source=task["mate_window_source"],
+                mate_window_size=task["mate_window_size"],
+                show_alignments=task["show_alignments"],
+                **common_kwargs,
+            )
+            summary = snap.snap()
+            return BatchResult(
+                region=region, output_path=snap.output_path,
+                summary=summary, summaries=[summary],
+            )
+
+        summaries = []
+        output_path, _ = compare_snapshots(
+            bam1=bam_paths[0], bam2=bam_paths[1],
+            additional_bams=bam_paths[2:],
+            label1=sample_labels[0], label2=sample_labels[1],
+            additional_labels=sample_labels[2:],
+            companion_vcfs=companion_vcfs,
+            chrom=region.chrom, start=region.start, end=region.end,
+            fasta=task["fasta"], output_dir=task["output_dir"],
+            output_name=region.name, output_format=task["output_format"],
+            result_summaries=summaries,
+            **common_kwargs,
+        )
+        return BatchResult(
+            region=region, output_path=output_path,
+            summary=summaries[0] if summaries else None,
+            summaries=summaries,
+        )
+    except (OSError, ValueError) as exc:
+        return BatchResult(region=region, error=str(exc))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="locus-snap",
@@ -100,7 +160,8 @@ def build_parser() -> argparse.ArgumentParser:
     region_group.add_argument(
         "--batch_regions", metavar="BED_OR_VCF",
         help=("BED3/BED4 file, or a VCF/VCF.gz/BCF (one region per record, chosen by file "
-              "extension), of regions to render in one run (single --bam only). An optional "
+              "extension), of regions to render in one run. Repeated --bam inputs become "
+              "stacked sample panels in every region. An optional "
               "BED 4th column, or the VCF ID column when set, names each region (used as its "
               "output filename stem). --flank matters here, especially for point variants: "
               "with --flank 0 a SNV renders as a ~1bp-wide image. Combine with --report to "
@@ -111,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=("Write a self-contained HTML report (default report.html) summarizing every "
               "--batch_regions snapshot with embedded images; requires --batch_regions and "
               "a browser-viewable --output_format (png, jpg, jpeg, webp, or svg)."),
+    )
+    parser.add_argument(
+        "--threads", type=int, default=1, metavar="N",
+        help=("Number of isolated worker processes used to render batch regions. "
+              "Results and report rows retain input order."),
     )
     parser.add_argument("--fasta", help="Reference FASTA (indexed or indexable). Enables mismatch/base coloring.")
     parser.add_argument(
@@ -502,12 +568,6 @@ def main(argv=None) -> int:
         companion_vcfs = [None] * len(bam_paths)
 
     if args.batch_regions:
-        if len(bam_paths) > 1:
-            log.error(
-                "--batch_regions does not yet support multiple --bam panels; "
-                "render one BAM at a time."
-            )
-            return 1
         if args.sort_base_position is not None:
             log.error("--sort_base_position cannot be combined with --batch_regions.")
             return 1
@@ -543,6 +603,9 @@ def main(argv=None) -> int:
         return 1
     if args.mate_window_size is not None and args.mate_window_size <= 0:
         log.error("--mate_window_size must be greater than zero.")
+        return 1
+    if args.threads < 1:
+        log.error("--threads must be at least one.")
         return 1
     if args.max_alignment_depth < 0:
         log.error("--max_alignment_depth cannot be negative (use 0 to disable downsampling).")
@@ -727,42 +790,52 @@ def main(argv=None) -> int:
             log.error(str(exc))
             return 1
 
-        if companion_vcfs[0]:
-            try:
-                annotation_sources.append(AnnotationSource(
-                    companion_vcfs[0], label=f"{sample_labels[0]} variants", kind="vcf",
-                    display_mode="collapse", track_colors=visual_config["track_colors"],
-                ))
-            except (OSError, ValueError) as exc:
-                log.error(str(exc))
-                return 1
-
-        results = []
+        tasks = []
         for region in regions:
-            snap = BamSnapshot(
-                bam=bam_paths[0], chrom=region.chrom, start=region.start, end=region.end,
-                fasta=args.fasta, output_dir=args.output_dir, output_name=region.name,
-                output_format=args.output_format,
-                label=sample_labels[0], mate_view=args.mate_view,
-                mate_window_source=args.mate_window_source,
-                mate_window_size=args.mate_window_size,
-                show_alignments=not args.no_alignments,
-                **common_kwargs,
+            tasks.append({
+                "region": region,
+                "bam_paths": bam_paths,
+                "sample_labels": sample_labels,
+                "companion_vcfs": companion_vcfs,
+                "common_kwargs": common_kwargs,
+                "fasta": args.fasta,
+                "output_dir": args.output_dir,
+                "output_format": args.output_format,
+                "mate_view": args.mate_view,
+                "mate_window_source": args.mate_window_source,
+                "mate_window_size": args.mate_window_size,
+                "show_alignments": not args.no_alignments,
+            })
+
+        worker_count = min(args.threads, len(tasks))
+        if worker_count == 1:
+            results = [_render_batch_region(task) for task in tasks]
+        else:
+            log.info(
+                "Rendering %d region(s) across %d worker processes.",
+                len(tasks), worker_count,
             )
-            try:
-                summary = snap.snap()
-            except (OSError, ValueError) as exc:
-                log.warning("Region %s (%s) failed: %s", region.name, region.display, exc)
-                results.append(BatchResult(region=region, error=str(exc)))
+            with ProcessPoolExecutor(max_workers=worker_count) as executor:
+                # executor.map deliberately preserves BED/VCF order.
+                results = list(executor.map(_render_batch_region, tasks))
+
+        for result in results:
+            region = result.region
+            if result.error:
+                log.warning(
+                    "Region %s (%s) failed: %s",
+                    region.name, region.display, result.error,
+                )
                 continue
-            results.append(BatchResult(region=region, output_path=snap.output_path, summary=summary))
-            print(
-                f"{region.name} [{region.display}]: {summary.n_reads} reads | "
-                f"gapped: {summary.n_gapped} ({summary.pct_gapped:.1f}%) | "
-                f"max gap: {summary.max_gap}bp | split (SA): {summary.n_with_sa} | "
-                f"discordant: {summary.n_discordant} ({summary.pct_discordant:.1f}%) | "
-                f"soft-clipped: {summary.n_softclipped}"
-            )
+            summary_text = []
+            for summary in result.sample_summaries():
+                summary_text.append(
+                    f"{summary.label}: {summary.n_reads} reads, "
+                    f"gapped {summary.pct_gapped:.1f}%, "
+                    f"discordant {summary.pct_discordant:.1f}%, "
+                    f"soft-clipped {summary.n_softclipped}"
+                )
+            print(f"{region.name} [{region.display}]: " + " | ".join(summary_text))
 
         n_failed = sum(1 for result in results if result.error)
         log.info(
@@ -775,7 +848,10 @@ def main(argv=None) -> int:
             report_path = os.path.join(args.output_dir, args.report)
             resolved_format = (args.output_format or "png").lower().lstrip(".")
             try:
-                write_html_report(results, report_path, resolved_format)
+                write_html_report(
+                    results, report_path, resolved_format,
+                    sample_labels=sample_labels,
+                )
             except (OSError, ValueError) as exc:
                 log.error(str(exc))
                 return 1

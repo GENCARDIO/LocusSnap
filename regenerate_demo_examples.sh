@@ -250,4 +250,40 @@ python3 -m locus_snap \
   --fig_width 10 \
   --dpi 150
 
-printf '%s\n' 'Regenerated the fourteen curated README figures in out/'
+python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_tumour.bam \
+  --bam out/demo_data/alignments/demo_normal.bam \
+  --bam out/demo_data/alignments/demo_relapse.bam \
+  --sample_label Tumour \
+  --sample_label Normal \
+  --sample_label Relapse \
+  --vcf_companion out/demo_data/variants/demo_tumour.vcf.gz \
+  --vcf_companion none \
+  --vcf_companion out/demo_data/variants/demo_relapse.vcf.gz \
+  --fasta out/demo_data/reference/demo_reference.fa \
+  --batch_regions out/demo_data/annotations/demo_multi_sample_review.bed \
+  --report 35_multi_sample_batch_report.html \
+  --threads 3 \
+  --display_mode squish \
+  --layout pack \
+  --max_alignment_depth 40 \
+  --genome none \
+  --refseq none \
+  --output_dir out/multi_sample_batch \
+  --fig_width 14 \
+  --dpi 120
+
+if command -v google-chrome >/dev/null 2>&1; then
+  google-chrome \
+    --headless \
+    --disable-gpu \
+    --no-sandbox \
+    --hide-scrollbars \
+    --window-size=1600,1100 \
+    --screenshot="$PROJECT_DIR/out/35_multi_sample_batch_report.png" \
+    "file://$PROJECT_DIR/out/multi_sample_batch/35_multi_sample_batch_report.html"
+else
+  printf '%s\n' 'Skipped report preview: google-chrome is not installed.'
+fi
+
+printf '%s\n' 'Regenerated the curated README figures and multi-sample batch report in out/'

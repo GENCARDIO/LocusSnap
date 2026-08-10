@@ -862,6 +862,17 @@ def write_chip_signal(path: Path, baseline: float, peaks) -> None:
             bin_index += 1
 
 
+def write_multi_sample_review_regions(path: Path) -> None:
+    """Candidate windows used by the reproducible multi-sample HTML report."""
+    path.write_text(
+        "# chrom\tstart\tend\tname\n"
+        "chrDemo\t78\t119\ttumour_subclonal_snv\n"
+        "chrDemo\t98\t139\tshared_heterozygous_snv\n"
+        "chrDemo\t139\t180\trelapse_enriched_snv\n",
+        encoding="utf-8",
+    )
+
+
 def main() -> None:
     ensure_demo_directories()
     tumour_profile = {
@@ -908,6 +919,9 @@ def main() -> None:
     write_met_ex14_tracks()
     write_structural_variant_bam(ALIGNMENTS_DIR / "demo_structural_variants.bam")
     write_structural_variant_vcf(VARIANTS_DIR / "demo_structural_variants.vcf")
+    write_multi_sample_review_regions(
+        ANNOTATIONS_DIR / "demo_multi_sample_review.bed"
+    )
 
     write_chip_signal(
         SIGNALS_DIR / "demo_ctcf_control.signal", 0.35,
