@@ -1,5 +1,5 @@
-"""Render many regions from one BED file and optionally roll them into one
-self-contained HTML report.
+"""Render many regions from BED/VCF and optionally roll them into one
+self-contained, single- or multi-sample HTML report.
 
 BED coordinates are already 0-based half-open, exactly the internal
 representation used everywhere else in this codebase (unlike --region, which
@@ -46,7 +46,14 @@ class BatchResult:
     region: BatchRegion
     output_path: Optional[str] = None
     summary: Optional[RegionSummary] = None
+    summaries: Optional[List[RegionSummary]] = None
     error: Optional[str] = None
+
+    def sample_summaries(self) -> List[RegionSummary]:
+        """Return ordered sample summaries while accepting legacy results."""
+        if self.summaries is not None:
+            return self.summaries
+        return [self.summary] if self.summary is not None else []
 
 
 def looks_like_vcf(path: str) -> bool:
@@ -163,7 +170,75 @@ def _summary_cells(summary: Optional[RegionSummary]) -> List[str]:
     ]
 
 
-def write_html_report(results: List[BatchResult], report_path: str, output_format: str) -> None:
+def _report_sample_labels(
+    results: List[BatchResult], sample_labels: Optional[List[str]]
+) -> List[str]:
+    labels = list(sample_labels or [])
+    sample_count = max(
+        [len(result.sample_summaries()) for result in results] + [len(labels), 1]
+    )
+    for sample_index in range(len(labels), sample_count):
+        inferred = None
+        for result in results:
+            summaries = result.sample_summaries()
+            if sample_index < len(summaries) and summaries[sample_index].label:
+                inferred = summaries[sample_index].label
+                break
+        labels.append(inferred or f"Sample {sample_index + 1}")
+    return labels
+
+
+def _delta(value: float, baseline: float, suffix: str = "") -> str:
+    difference = value - baseline
+    if abs(difference) < 0.05:
+        return "0" + suffix
+    return f"{difference:+.1f}{suffix}"
+
+
+def _sample_metrics_table(
+    summaries: List[RegionSummary], sample_labels: List[str]
+) -> str:
+    if not summaries:
+        return ""
+    baseline = summaries[0]
+    rows = []
+    for sample_index, label in enumerate(sample_labels):
+        if sample_index >= len(summaries):
+            cells = ["-", "-", "-", "-", "-", "-", "-", "-"]
+        else:
+            summary = summaries[sample_index]
+            cells = _summary_cells(summary)
+            if sample_index == 0:
+                cells.extend(["baseline", "baseline", "baseline", "baseline"])
+            else:
+                cells.extend([
+                    f"{summary.n_reads - baseline.n_reads:+d}",
+                    _delta(summary.pct_gapped, baseline.pct_gapped, " pp"),
+                    _delta(summary.pct_discordant, baseline.pct_discordant, " pp"),
+                    f"{summary.n_softclipped - baseline.n_softclipped:+d}",
+                ])
+        rows.append(
+            "<tr>"
+            f"<th scope='row'>{html.escape(label)}</th>"
+            + "".join(f"<td>{cell}</td>" for cell in cells)
+            + "</tr>"
+        )
+    return (
+        "<div class='table-scroll'><table class='sample-metrics'>"
+        "<thead><tr><th>Sample</th><th>Reads</th><th>Gapped</th>"
+        "<th>Discordant</th><th>Soft-clipped</th><th>&Delta; reads</th>"
+        "<th>&Delta; gapped</th><th>&Delta; discordant</th>"
+        "<th>&Delta; soft-clipped</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></div>"
+    )
+
+
+def write_html_report(
+    results: List[BatchResult],
+    report_path: str,
+    output_format: str,
+    sample_labels: Optional[List[str]] = None,
+) -> None:
     """Write one self-contained HTML report with every rendered image embedded
     as a base64 data URI, plus an index table and a per-region summary card.
     """
@@ -175,6 +250,27 @@ def write_html_report(results: List[BatchResult], report_path: str, output_forma
             f"got {output_format!r}. PDF/TIFF/SVGZ cannot be embedded in an HTML report."
         )
     mime_type = MIME_TYPES[selected_format]
+    labels = _report_sample_labels(results, sample_labels)
+    multi_sample = len(labels) > 1
+
+    if multi_sample:
+        grouped_headers = "".join(
+            f"<th class='sample-group' colspan='4'>{html.escape(label)}</th>"
+            for label in labels
+        )
+        metric_headers = "".join(
+            "<th>Reads</th><th>Gapped</th><th>Discordant</th><th>Soft-clipped</th>"
+            for _ in labels
+        )
+        index_header = (
+            "<tr><th rowspan='2'>Name</th><th rowspan='2'>Region</th>"
+            f"{grouped_headers}</tr><tr>{metric_headers}</tr>"
+        )
+    else:
+        index_header = (
+            "<tr><th>Name</th><th>Region</th><th>Reads</th><th>Gapped</th>"
+            "<th>Discordant</th><th>Soft-clipped</th></tr>"
+        )
 
     n_ok = 0
     n_failed = 0
@@ -188,7 +284,7 @@ def write_html_report(results: List[BatchResult], report_path: str, output_forma
             index_rows.append(
                 f"<tr class='failed'><td><a href='#{anchor}'>{html.escape(region.name)}</a></td>"
                 f"<td>{html.escape(region.display)}</td>"
-                f"<td colspan='4'>failed</td></tr>"
+                f"<td colspan='{4 * len(labels)}'>failed</td></tr>"
             )
             cards.append(
                 f"<section class='card failed' id='{anchor}'>"
@@ -200,20 +296,33 @@ def write_html_report(results: List[BatchResult], report_path: str, output_forma
             continue
 
         n_ok += 1
-        reads, gapped, discordant, softclipped = _summary_cells(result.summary)
+        summaries = result.sample_summaries()
+        summary_cells = []
+        for sample_index in range(len(labels)):
+            summary = summaries[sample_index] if sample_index < len(summaries) else None
+            summary_cells.extend(_summary_cells(summary))
         index_rows.append(
             f"<tr><td><a href='#{anchor}'>{html.escape(region.name)}</a></td>"
             f"<td>{html.escape(region.display)}</td>"
-            f"<td>{reads}</td><td>{gapped}</td><td>{discordant}</td><td>{softclipped}</td></tr>"
+            + "".join(f"<td>{cell}</td>" for cell in summary_cells)
+            + "</tr>"
         )
         with open(result.output_path, "rb") as image_file:
             encoded = base64.b64encode(image_file.read()).decode("ascii")
+        metrics = _sample_metrics_table(summaries, labels) if multi_sample else ""
+        if summaries:
+            reads, gapped, discordant, softclipped = _summary_cells(summaries[0])
+            single_summary = (
+                f" &middot; {reads} reads, {gapped} gapped, {discordant} discordant, "
+                f"{softclipped} soft-clipped"
+            ) if not multi_sample else ""
+        else:
+            single_summary = ""
         cards.append(
             f"<section class='card' id='{anchor}'>"
             f"<h2>{html.escape(region.name)}</h2>"
-            f"<p class='region'>{html.escape(region.display)} &middot; "
-            f"{reads} reads, {gapped} gapped, {discordant} discordant, "
-            f"{softclipped} soft-clipped</p>"
+            f"<p class='region'>{html.escape(region.display)}{single_summary}</p>"
+            f"{metrics}"
             f"<img src='data:{mime_type};base64,{encoded}' alt='{anchor}'>"
             f"</section>"
         )
@@ -229,8 +338,11 @@ def write_html_report(results: List[BatchResult], report_path: str, output_forma
          color: #1a1a1a; background: #fafaf8; }}
   h1 {{ margin-bottom: 0.2rem; }}
   .meta {{ color: #666; margin-top: 0; margin-bottom: 1.5rem; }}
-  table {{ border-collapse: collapse; margin-bottom: 2rem; }}
+  .table-scroll {{ overflow-x: auto; }}
+  table {{ border-collapse: collapse; margin-bottom: 2rem; white-space: nowrap; }}
   th, td {{ padding: 0.35rem 0.75rem; border-bottom: 1px solid #ddd; text-align: left; }}
+  thead th {{ background: #f2f3f3; }}
+  th.sample-group {{ text-align: center; border-left: 2px solid #fff; }}
   tr.failed td {{ color: #a33; }}
   .card {{ border: 1px solid #ddd; border-radius: 6px; padding: 1rem 1.25rem;
            margin-bottom: 1.5rem; background: #fff; }}
@@ -239,17 +351,19 @@ def write_html_report(results: List[BatchResult], report_path: str, output_forma
   .card .region {{ color: #555; margin-top: 0; font-size: 0.9rem; }}
   .card .error {{ color: #a33; font-family: monospace; white-space: pre-wrap; }}
   .card img {{ max-width: 100%; height: auto; display: block; margin-top: 0.5rem; }}
+  .sample-metrics {{ margin: 0.5rem 0 1rem; font-size: 0.84rem; }}
+  .sample-metrics th[scope='row'] {{ background: transparent; }}
 </style>
 </head>
 <body>
 <h1>LocusSnap batch report</h1>
-<p class="meta">Generated {generated_at} &middot; {n_ok} rendered, {n_failed} failed</p>
-<table>
-<thead><tr><th>Name</th><th>Region</th><th>Reads</th><th>Gapped</th><th>Discordant</th><th>Soft-clipped</th></tr></thead>
+<p class="meta">Generated {generated_at} &middot; {n_ok} rendered, {n_failed} failed &middot; {len(labels)} sample{'s' if len(labels) != 1 else ''}</p>
+<div class="table-scroll"><table>
+<thead>{index_header}</thead>
 <tbody>
 {"".join(index_rows)}
 </tbody>
-</table>
+</table></div>
 {"".join(cards)}
 </body>
 </html>

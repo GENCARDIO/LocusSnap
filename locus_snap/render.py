@@ -985,7 +985,7 @@ class AlignmentRenderer:
 
     def draw_coverage_track(
         self, ax, reads: List[AlignedRead], start: int, end: int
-    ) -> None:
+    ) -> int:
         """Draw depth with qualifying SNV allele fractions stacked in base colours."""
         span = max(end - start, 1)
         axes_width_pixels = max(int(ax.get_window_extent().width), 1)
@@ -1080,6 +1080,7 @@ class AlignmentRenderer:
                         "edgecolor": "none", "alpha": 0.68, "pad": 0.15,
                     },
                 )
+        return max(max_depth, 1)
 
     def draw_center_guide(self, ax, start: int, end: int) -> None:
         """Draw the optional IGV-like guide at the exact window midpoint."""
@@ -2009,6 +2010,8 @@ class AlignmentRenderer:
             ratios.append(self.annotation_track_height(annotation))
 
         panel_track_names = []
+        coverage_axes = []
+        shared_coverage_max = 1
         for i, panel in enumerate(panels):
             n_rows = max(len(panel["rows"]), 1)
             header_name = f"panel_header_{i}"
@@ -2129,7 +2132,11 @@ class AlignmentRenderer:
                     cov_reads = []
                     for row in rows:
                         cov_reads.extend(row)
-                self.draw_coverage_track(cov_ax, cov_reads, window_start, window_end)
+                panel_coverage_max = self.draw_coverage_track(
+                    cov_ax, cov_reads, window_start, window_end
+                )
+                coverage_axes.append(cov_ax)
+                shared_coverage_max = max(shared_coverage_max, panel_coverage_max)
 
             if self.show_sashimi:
                 sashimi_reads = panel.get("all_reads_for_coverage")
@@ -2155,6 +2162,12 @@ class AlignmentRenderer:
                 aln_ax.text(0.5, 0.5, "No alignments in this region", transform=aln_ax.transAxes,
                             ha="center", va="center", fontsize=9,
                             color=self.visual_colors["secondary_text"])
+        # Identical y limits make depth differences comparable between sample
+        # panels instead of independently stretching every coverage profile.
+        if len(coverage_axes) > 1:
+            for cov_ax in coverage_axes:
+                cov_ax.set_ylim(0, shared_coverage_max * 1.15)
+                cov_ax.set_yticks([0, shared_coverage_max])
         for track, ax in ax_by_track.items():
             if track != "ideogram" and not track.startswith("panel_header_"):
                 self.draw_center_guide(ax, window_start, window_end)

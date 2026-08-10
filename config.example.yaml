@@ -1,6 +1,8 @@
 # Every key is optional. Explicit CLI arguments override values in preferences.
 preferences:
   flank: 0
+  # Batch regions render sequentially by default; increase for independent workers.
+  threads: 1
   layout: pack
   display_mode: expand
   track_display: pack

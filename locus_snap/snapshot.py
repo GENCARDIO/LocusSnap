@@ -763,8 +763,13 @@ def compare_snapshots(
     highlight_color: str = "#ffd54f",
     highlight_alpha: float = 0.20,
     title_align: str = "left",
+    result_summaries: Optional[List[RegionSummary]] = None,
 ) -> tuple[str, str]:
-    """Render two or more BAMs as sample panels sharing one genomic x-axis."""
+    """Render two or more BAMs as sample panels sharing one genomic x-axis.
+
+    ``result_summaries`` is an optional mutable sink used by batch reports.
+    The established two-value return shape stays unchanged for API callers.
+    """
     os.makedirs(output_dir, exist_ok=True)
     bam_paths = [bam1, bam2]
     bam_paths.extend(additional_bams or [])
@@ -911,4 +916,6 @@ def compare_snapshots(
         assembly_label=cytoband_label,
     )
 
+    if result_summaries is not None:
+        result_summaries.extend(summaries)
     return out_path, format_summary_table(summaries)
