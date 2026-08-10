@@ -141,6 +141,8 @@ def test_complete_theme_sections_are_merged_and_used(tmp_path):
         "  coverage: '#334455'\n"
         "haplotype_colors:\n"
         "  '1': '#445566'\n"
+        "tag_colors:\n"
+        "  tumour: '#aa3377'\n"
         "cytoband_colors:\n"
         "  acen: '#556677'\n"
         "chromosome_palette: ['#667788', '#778899']\n"
@@ -162,6 +164,7 @@ def test_complete_theme_sections_are_merged_and_used(tmp_path):
     assert theme["track_colors"]["bed"] == "#223344"
     assert renderer.visual_colors["coverage"] == "#334455"
     assert renderer.haplotype_colors["1"] == "#445566"
+    assert renderer.tag_colors["tumour"] == "#aa3377"
     assert renderer.cytoband_colors["acen"] == "#556677"
     assert renderer.chromosome_palette == ["#667788", "#778899"]
     assert renderer.row_height_in == pytest.approx(0.31)

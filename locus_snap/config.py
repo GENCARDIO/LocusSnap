@@ -64,6 +64,9 @@ DEFAULT_VISUAL_COLORS = {
 DEFAULT_HAPLOTYPE_COLORS = {
     "1": "#3b6fb6", "2": "#e6862d", "untagged": "#9b9b96",
 }
+DEFAULT_TAG_COLORS = {
+    "untagged": "#9b9b96",
+}
 DEFAULT_CYTOBAND_COLORS = {
     "gneg": "#ffffff", "gpos25": "#c8c8c8", "gpos50": "#969696",
     "gpos75": "#646464", "gpos100": "#1f1f1f", "gvar": "#dddddd",
@@ -128,6 +131,7 @@ DEFAULT_STYLES = {
     "signal_fill_alpha": 0.82,
     "density_fill_alpha": 0.45,
     "haplotype_lane_alpha": 0.055,
+    "tag_lane_alpha": 0.055,
     "alignment_edge_width": 0.00,
     "squish_alignment_edge_width": 0.00,
     "annotation_edge_width": 0.30,
@@ -176,6 +180,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "track_colors": DEFAULT_TRACK_COLORS,
     "visual_colors": DEFAULT_VISUAL_COLORS,
     "haplotype_colors": DEFAULT_HAPLOTYPE_COLORS,
+    "tag_colors": DEFAULT_TAG_COLORS,
     "cytoband_colors": DEFAULT_CYTOBAND_COLORS,
     "chromosome_colors": DEFAULT_CHROMOSOME_COLORS,
     "chromosome_palette": DEFAULT_CHROMOSOME_PALETTE,
@@ -186,13 +191,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 CONFIG_SECTIONS = set(DEFAULT_CONFIG)
 COLOR_SECTIONS = (
     "alignment_colors", "base_colors", "track_colors", "visual_colors",
-    "haplotype_colors", "cytoband_colors", "chromosome_colors",
+    "haplotype_colors", "tag_colors", "cytoband_colors", "chromosome_colors",
 )
 ALPHA_STYLE_KEYS = {
     "alignment_alpha", "secondary_alignment_alpha", "mapq_alpha_floor",
     "coverage_alpha", "reference_base_alpha", "cnv_fill_alpha", "baf_alpha",
     "peak_fill_alpha", "signal_fill_alpha", "density_fill_alpha",
-    "haplotype_lane_alpha",
+    "haplotype_lane_alpha", "tag_lane_alpha",
     "center_guide_alpha",
     "breakpoint_link_alpha",
     "grid_line_alpha", "minor_grid_line_alpha", "grid_band_alpha",
@@ -248,7 +253,7 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
         if not isinstance(configured, dict):
             raise ValueError(f"'{section}' must be a YAML mapping.")
         unknown = (
-            [] if section in ("haplotype_colors", "chromosome_colors")
+            [] if section in ("haplotype_colors", "tag_colors", "chromosome_colors")
             else sorted(set(configured) - set(config[section]))
         )
         if unknown:

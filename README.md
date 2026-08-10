@@ -99,6 +99,13 @@ Click any preview for the full-resolution figure.
     </td>
   </tr>
   <tr>
+    <td colspan="2">
+      <a href="out/36_tag_grouped_reads.png"><img src="out/36_tag_grouped_reads.png" alt="Reads grouped into three labelled and distinctly coloured BAM read-group lanes"></a><br>
+      <strong>Group and colour reads by BAM tag</strong><br>
+      <sub>Three RG libraries are separated into labelled lanes, with deterministic or user-defined colours and ordinary base mismatches retained.</sub>
+    </td>
+  </tr>
+  <tr>
     <td width="50%">
       <a href="out/26_chipseq_peaks_density.png"><img src="out/26_chipseq_peaks_density.png" alt="Normalized CTCF ChIP-seq signal profiles"></a><br>
       <strong>ChIP-seq signal profiles</strong><br>
@@ -386,6 +393,32 @@ locus-snap \
 `color` colours reads by the `HP` tag. `split` also creates HP lanes and shows
 phase-set information from `PS`. Override the tags with `--haplotype_tag` and
 `--phase_set_tag`.
+
+### Group and colour reads by any BAM tag
+
+Separate reads into lanes by a scalar SAM tag such as read group (`RG`), cell
+barcode (`CB`), or a caller-specific support tag:
+
+```bash
+locus-snap \
+  --bam tumour.bam \
+  --region chr1:100001-100500 \
+  --group_by_tag RG \
+  --tag_label 'Read group' \
+  --tag_color 'Library_A=#377eb8' \
+  --tag_color 'Library_B=#e6862d' \
+  --tag_filter Library_A Library_B untagged \
+  --output_name libraries
+```
+
+`--group_by_tag` both colours and separates values into labelled lanes.
+`--color_by_tag` applies the same colours without changing row placement.
+Values without an explicit `--tag_color` receive stable palette colours, and
+reads missing the selected tag become `untagged`. The legend lists up to eight
+entries and summarizes additional high-cardinality values, so tags such as
+`CB` do not create an unbounded legend. Use `--tag_filter` when only selected
+barcodes or categories should be shown. Generic tag views and
+`--haplotype_view` are mutually exclusive because both control read colour.
 
 ### RNA-seq sashimi view
 
@@ -807,6 +840,10 @@ CIGAR insertion and deletion lengths are hidden by default. Show them with
 | `--max_alignment_depth N` | downsample displayed reads above N×; default 100 |
 | `--view_as_pairs` | link visible primary mates |
 | `--mate_view` | add an inferred mate-locus panel |
+| `--group_by_tag TAG` | colour and separate reads into labelled BAM-tag lanes |
+| `--color_by_tag TAG` | colour reads by a BAM tag without changing row placement |
+| `--tag_filter VALUE [...]` | retain selected tag values, including `untagged` |
+| `--tag_color VALUE=COLOR` | override a tag value colour; repeatable |
 | `--track PATH` | add a genomic track; repeatable |
 | `--custom_track SPEC` | add a named, coloured, sized track |
 | `--config YAML` | reusable defaults and styles |

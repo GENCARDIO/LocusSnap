@@ -125,6 +125,11 @@ class BamSnapshot:
         haplotype_filter: Optional[List[str]] = None,
         haplotype_tag: str = "HP",
         phase_set_tag: str = "PS",
+        read_tag: Optional[str] = None,
+        tag_view: str = "none",
+        tag_filter: Optional[List[str]] = None,
+        tag_label: Optional[str] = None,
+        tag_colors: Optional[Dict[str, str]] = None,
         output_format: Optional[str] = None,
         grid_mode: str = "major",
         highlight_regions: Optional[List[HighlightRegion]] = None,
@@ -194,6 +199,11 @@ class BamSnapshot:
         self.haplotype_filter = list(haplotype_filter or [])
         self.haplotype_tag = haplotype_tag
         self.phase_set_tag = phase_set_tag
+        self.read_tag = read_tag
+        self.tag_view = tag_view
+        self.tag_filter = list(tag_filter or [])
+        self.tag_label = tag_label
+        self.tag_colors = dict(tag_colors or {})
 
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -238,6 +248,8 @@ class BamSnapshot:
             haplotype_tag=self.haplotype_tag,
             phase_set_tag=self.phase_set_tag,
             haplotype_filter=self.haplotype_filter,
+            read_tag=self.read_tag,
+            tag_filter=self.tag_filter,
         )
         self.reads = []
         for read in self.source_reads:
@@ -280,6 +292,7 @@ class BamSnapshot:
             descending=self.descending, display_mode=self.display_mode,
             view_as_pairs=self.view_as_pairs,
             haplotype_view=self.haplotype_view,
+            tag_view=self.tag_view,
             base_position=base_position, reference_base=reference_base,
         )
         rows, dropped = truncate_rows(rows, self.max_rows)
@@ -307,6 +320,10 @@ class BamSnapshot:
             show_variant_counts=self.show_variant_counts,
             show_indel_lengths=self.show_indel_lengths,
             haplotype_view=self.haplotype_view,
+            read_tag=self.read_tag,
+            tag_view=self.tag_view,
+            tag_label=self.tag_label,
+            tag_colors=self.tag_colors,
             sort_base_position=base_position if self.sort_by == "base" else None,
             sort_reference_base=reference_base,
             show_center_guide=self.show_center_guide,
@@ -325,6 +342,7 @@ class BamSnapshot:
                 f"{self.label} -- {len(reads)} reads, display={self.display_mode}, layout={self.layout}, "
                 f"view={'pairs' if self.view_as_pairs else 'alignments'}, "
                 f"haplotypes={self.haplotype_view}, "
+                f"tag={self.read_tag + ':' + self.tag_view if self.read_tag else 'none'}, "
                 f"sort_by={sort_label} ({'desc' if self.descending else 'asc'})"
             )
         if self.mate_view:
@@ -350,6 +368,8 @@ class BamSnapshot:
                 haplotype_tag=self.haplotype_tag,
                 phase_set_tag=self.phase_set_tag,
                 haplotype_filter=self.haplotype_filter,
+                read_tag=self.read_tag,
+                tag_filter=self.tag_filter,
             )
             support_names = supporting_query_names(
                 self.source_reads, self.mate_window_source, mate.chrom, self.min_softclip
@@ -397,6 +417,7 @@ class BamSnapshot:
                 descending=self.descending, display_mode=self.display_mode,
                 view_as_pairs=self.view_as_pairs,
                 haplotype_view=self.haplotype_view,
+                tag_view=self.tag_view,
                 base_position=mate_base_position,
                 reference_base=mate_reference_base,
             )
@@ -443,6 +464,7 @@ class BamSnapshot:
                     f"{self.label} mate view -- display={self.display_mode}, layout={self.layout}, "
                     f"view={'pairs' if self.view_as_pairs else 'alignments'}, "
                     f"haplotypes={self.haplotype_view}, "
+                    f"tag={self.read_tag + ':' + self.tag_view if self.read_tag else 'none'}, "
                     f"sort_by={sort_label} ({'desc' if self.descending else 'asc'})"
                 ),
                 assembly_label=self.cytoband_label,
@@ -520,6 +542,11 @@ def render_multi_locus_snapshots(
     haplotype_filter: Optional[List[str]] = None,
     haplotype_tag: str = "HP",
     phase_set_tag: str = "PS",
+    read_tag: Optional[str] = None,
+    tag_view: str = "none",
+    tag_filter: Optional[List[str]] = None,
+    tag_label: Optional[str] = None,
+    tag_colors: Optional[Dict[str, str]] = None,
     output_format: Optional[str] = None,
     companion_vcfs: Optional[List[Optional[str]]] = None,
     grid_mode: str = "major",
@@ -599,6 +626,7 @@ def render_multi_locus_snapshots(
                 insert_size_sigma=insert_size_sigma, only_types=only_types,
                 min_softclip=min_softclip, haplotype_tag=haplotype_tag,
                 phase_set_tag=phase_set_tag, haplotype_filter=haplotype_filter,
+                read_tag=read_tag, tag_filter=tag_filter,
             )
             sample_reference_base = reference_base
             if sort_by == "base" and sample_reference_base not in ("A", "C", "G", "T"):
@@ -620,6 +648,7 @@ def render_multi_locus_snapshots(
                 display_reads, layout=layout, sort_by=sort_by,
                 descending=descending, display_mode=display_mode,
                 view_as_pairs=view_as_pairs, haplotype_view=haplotype_view,
+                tag_view=tag_view,
                 base_position=base_position, reference_base=sample_reference_base,
             )
             rows, dropped = truncate_rows(rows, max_rows)
@@ -680,6 +709,8 @@ def render_multi_locus_snapshots(
         show_variant_counts=show_variant_counts,
         show_indel_lengths=show_indel_lengths,
         haplotype_view=haplotype_view,
+        read_tag=read_tag, tag_view=tag_view, tag_label=tag_label,
+        tag_colors=tag_colors,
         sort_base_position=None, sort_reference_base=None,
         show_center_guide=show_center_guide, show_sashimi=show_sashimi,
         min_junction_reads=min_junction_reads, sashimi_strand=sashimi_strand,
@@ -689,6 +720,7 @@ def render_multi_locus_snapshots(
         suptitle=(
             f"{len(regions)}-locus view · display={display_mode}, layout={layout}, "
             f"view={'pairs' if view_as_pairs else 'alignments'}, "
+            f"tag={read_tag + ':' + tag_view if read_tag else 'none'}, "
             f"sort_by={sort_by} ({'desc' if descending else 'asc'})"
         ),
         assembly_label=assembly_label,
@@ -754,6 +786,11 @@ def compare_snapshots(
     haplotype_filter: Optional[List[str]] = None,
     haplotype_tag: str = "HP",
     phase_set_tag: str = "PS",
+    read_tag: Optional[str] = None,
+    tag_view: str = "none",
+    tag_filter: Optional[List[str]] = None,
+    tag_label: Optional[str] = None,
+    tag_colors: Optional[Dict[str, str]] = None,
     output_format: Optional[str] = None,
     additional_bams: Optional[List[str]] = None,
     additional_labels: Optional[List[str]] = None,
@@ -819,6 +856,7 @@ def compare_snapshots(
             only_types=only_types, min_softclip=min_softclip,
             haplotype_tag=haplotype_tag, phase_set_tag=phase_set_tag,
             haplotype_filter=haplotype_filter,
+            read_tag=read_tag, tag_filter=tag_filter,
         )
         if sort_by == "base" and reference_base not in ("A", "C", "G", "T"):
             reference_base = infer_reference_base(reads, base_position)
@@ -840,6 +878,7 @@ def compare_snapshots(
             descending=descending, display_mode=display_mode,
             view_as_pairs=view_as_pairs,
             haplotype_view=haplotype_view,
+            tag_view=tag_view,
             base_position=base_position, reference_base=reference_base,
         )
         rows, dropped = truncate_rows(rows, max_rows)
@@ -892,6 +931,10 @@ def compare_snapshots(
         show_variant_counts=show_variant_counts,
         show_indel_lengths=show_indel_lengths,
         haplotype_view=haplotype_view,
+        read_tag=read_tag,
+        tag_view=tag_view,
+        tag_label=tag_label,
+        tag_colors=tag_colors,
         sort_base_position=base_position if sort_by == "base" else None,
         sort_reference_base=reference_base,
         show_center_guide=show_center_guide,
@@ -906,6 +949,7 @@ def compare_snapshots(
             f"display={display_mode}, layout={layout}, "
             f"view={'pairs' if view_as_pairs else 'alignments'}, "
             f"haplotypes={haplotype_view}, "
+            f"tag={read_tag + ':' + tag_view if read_tag else 'none'}, "
             f"sort_by={sort_by}"
             f"{'@' + format(base_position + 1, ',') if sort_by == 'base' else ''} "
             f"({'desc' if descending else 'asc'})"

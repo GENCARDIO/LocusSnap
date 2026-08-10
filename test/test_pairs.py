@@ -126,6 +126,35 @@ def test_aligned_read_extracts_standard_and_custom_haplotype_tags():
     assert custom.haplotype == "maternal"
     assert custom.phase_set == "block-a"
 
+    custom_segment.set_tag("RG", "library-a")
+    tagged = AlignedRead(custom_segment, read_tag="RG")
+    assert tagged.read_tag == "RG"
+    assert tagged.tag_value == "library-a"
+
+
+def test_fetch_reads_filters_generic_tag_values_and_untagged(tmp_path):
+    bam_path = tmp_path / "read-groups.bam"
+    segments = []
+    for index, read_group in enumerate(("library-a", "library-b", None)):
+        segment = make_segment(
+            f"read-{read_group or 'none'}", "chr1", 100 + index * 100,
+            False, paired=False,
+        )
+        if read_group:
+            segment.set_tag("RG", read_group)
+        segments.append(segment)
+    with pysam.AlignmentFile(str(bam_path), "wb", header=HEADER) as bam:
+        for segment in segments:
+            bam.write(segment)
+    pysam.index(str(bam_path))
+
+    selected = fetch_reads(
+        str(bam_path), "chr1", 0, 1000,
+        read_tag="RG", tag_filter=["library-b", "untagged"],
+    )
+
+    assert [read.query_name for read in selected] == ["read-library-b", "read-none"]
+
 
 def test_fetch_reads_filters_selected_haplotypes_and_untagged(tmp_path):
     bam_path = tmp_path / "haplotypes.bam"

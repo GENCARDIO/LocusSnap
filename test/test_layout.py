@@ -33,6 +33,7 @@ class FakeRead:
     reference_name: str = "chr1"
     haplotype: str = None
     phase_set: str = None
+    tag_value: str = None
     bases: dict = None
 
     def base_at(self, position):
@@ -186,6 +187,32 @@ def test_unknown_haplotype_view_is_rejected():
         build_rows(
             [], layout="pack", sort_by="start", descending=False,
             haplotype_view="rainbow",
+        )
+
+
+def test_split_generic_tag_view_creates_naturally_ordered_lanes():
+    reads = [
+        FakeRead(40, 50, query_name="text", tag_value="library-a"),
+        FakeRead(20, 30, query_name="ten", tag_value="10"),
+        FakeRead(60, 70, query_name="untagged"),
+        FakeRead(0, 10, query_name="two", tag_value="2"),
+    ]
+
+    rows = build_rows(
+        reads, layout="pack", sort_by="start", descending=False,
+        display_mode="collapse", tag_view="split",
+    )
+
+    assert [[read.query_name for read in row] for row in rows] == [
+        ["two"], ["ten"], ["text"], ["untagged"],
+    ]
+
+
+def test_haplotype_and_generic_tag_views_are_mutually_exclusive():
+    with pytest.raises(ValueError, match="cannot be active together"):
+        build_rows(
+            [], layout="pack", sort_by="start", descending=False,
+            haplotype_view="color", tag_view="split",
         )
 
 

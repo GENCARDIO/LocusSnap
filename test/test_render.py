@@ -28,6 +28,7 @@ from locus_snap.render import (
     genomic_tick_labels,
     haplotype_color,
     nice_scale_length,
+    tag_color,
 )
 
 
@@ -822,6 +823,70 @@ def test_split_haplotype_lanes_show_hp_and_phase_set_labels():
     ]
     assert len(ax.lines) == 2
     assert len(ax.patches) == 2
+    plt.close(fig)
+
+
+def test_generic_tag_view_colours_reads_and_builds_dynamic_legend():
+    renderer = AlignmentRenderer(
+        read_tag="RG", tag_view="color", tag_label="Library",
+        tag_colors={"tumour": "#445566"},
+    )
+    read = SimpleNamespace(
+        tag_value="tumour", pair_category="large_insert", mate_chrom="chr1",
+        is_secondary=False, is_duplicate=False, mapq=60,
+    )
+
+    color, alpha = renderer.read_style(read)
+
+    assert color == "#445566"
+    assert tag_color("tumour", {"tumour": "#445566"}) == "#445566"
+    assert alpha == pytest.approx(0.9)
+    fig = plt.figure(figsize=(14, 2))
+    legends = renderer.draw_legends(fig, fig_height=2)
+    assert [legend.get_title().get_text() for legend in legends] == [
+        "Alignment", "Read events", "Library", "Base identity",
+    ]
+    assert [text.get_text() for text in legends[2].get_texts()] == ["tumour (n=1)"]
+    plt.close(fig)
+
+
+def test_split_generic_tag_lanes_use_tag_label_and_untagged_value():
+    renderer = AlignmentRenderer(
+        read_tag="RG", tag_view="split", tag_label="Library"
+    )
+    rows = [
+        [SimpleNamespace(tag_value="A")],
+        [SimpleNamespace(tag_value="A")],
+        [SimpleNamespace(tag_value="B")],
+        [SimpleNamespace(tag_value=None)],
+    ]
+    fig, ax = plt.subplots(figsize=(8, 2))
+    ax.set_ylim(4, 0)
+
+    renderer.draw_haplotype_lanes(ax, rows)
+
+    assert [text.get_text() for text in ax.texts] == [
+        "Library=A (n=2)", "Library=B (n=1)", "Library=untagged (n=1)",
+    ]
+    assert len(ax.lines) == 2
+    assert len(ax.patches) == 2
+    plt.close(fig)
+
+
+def test_high_cardinality_tag_legend_is_bounded():
+    renderer = AlignmentRenderer(read_tag="CB", tag_view="color")
+    for index in range(12):
+        renderer.read_style(SimpleNamespace(
+            tag_value=f"cell-{index:02d}", pair_category="normal", mate_chrom="chr1",
+            is_secondary=False, is_duplicate=False, mapq=60,
+        ))
+    fig = plt.figure(figsize=(14, 2))
+
+    legends = renderer.draw_legends(fig, fig_height=2)
+    labels = [text.get_text() for text in legends[2].get_texts()]
+
+    assert len(labels) == 8
+    assert "5 more values" in labels
     plt.close(fig)
 
 

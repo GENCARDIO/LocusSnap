@@ -277,6 +277,26 @@ python3 -m locus_snap \
   --dpi 150
 
 python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_tagged_reads.bam \
+  --sample_label 'Tumour capture reads · grouped by read group' \
+  --fasta out/demo_data/reference/demo_reference.fa \
+  --region chrDemo:81-180 \
+  --group_by_tag RG \
+  --tag_label 'Read group' \
+  --tag_color 'Library_A=#377eb8' \
+  --tag_color 'Library_B=#e6862d' \
+  --tag_color 'Library_C=#1baf7a' \
+  --display_mode squish \
+  --layout pack \
+  --max_alignment_depth 0 \
+  --genome none \
+  --refseq none \
+  --output_dir out \
+  --output_name 36_tag_grouped_reads \
+  --fig_width 14 \
+  --dpi 140
+
+python3 -m locus_snap \
   --bam out/demo_data/alignments/demo_tumour.bam \
   --bam out/demo_data/alignments/demo_normal.bam \
   --bam out/demo_data/alignments/demo_relapse.bam \

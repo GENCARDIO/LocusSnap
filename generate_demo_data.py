@@ -97,7 +97,7 @@ def add_sequencing_errors(sequence, qualities, rng: Random, error_rate: float) -
 
 def create_variant_read(
     header, reference: str, read_index: int, sample_name: str,
-    variant_fractions, rng: Random,
+    variant_fractions, rng: Random, read_group: str = None,
 ):
     read_length = 100
     start = max(45, min(100, round(rng.gauss(73, 11))))
@@ -123,26 +123,36 @@ def create_variant_read(
     if read_index % 3 != 2:
         read.set_tag("HP", 1 if read_index % 3 == 0 else 2)
         read.set_tag("PS", 1001 if read_index % 6 < 3 else 1002)
+    if read_group:
+        read.set_tag("RG", read_group)
     return read
 
 
 def write_variant_bam(
     path: Path, sample_name: str, read_count: int, profile, seed: int,
+    read_groups=None,
 ) -> None:
     with pysam.FastaFile(str(REFERENCE_PATH)) as fasta:
         reference = fasta.fetch("chrDemo").upper()
     rng = Random(seed)
+    read_groups = list(read_groups or [])
+    header_read_groups = (
+        [{"ID": group, "SM": sample_name, "LB": f"{sample_name}_capture"}
+         for group in read_groups]
+        if read_groups else [{"ID": sample_name, "SM": sample_name}]
+    )
     header_dict = {
         "HD": {"VN": "1.6", "SO": "coordinate"},
         "SQ": [{"SN": "chrDemo", "LN": len(reference)}],
-        "RG": [{"ID": sample_name, "SM": sample_name}],
+        "RG": header_read_groups,
     }
     header = pysam.AlignmentHeader.from_dict(header_dict)
     reads = []
     for read_index in range(read_count):
         reads.append(
             create_variant_read(
-                header, reference, read_index, sample_name.lower(), profile, rng
+                header, reference, read_index, sample_name.lower(), profile, rng,
+                read_group=(read_groups[read_index % len(read_groups)] if read_groups else None),
             )
         )
     reads.sort(key=lambda read: (read.reference_start, read.query_name))
@@ -903,6 +913,11 @@ def main() -> None:
     write_variant_bam(
         ALIGNMENTS_DIR / "demo_relapse.bam", "Relapse", 210,
         relapse_profile, seed=8_401,
+    )
+    write_variant_bam(
+        ALIGNMENTS_DIR / "demo_tagged_reads.bam", "Tumour", 210,
+        tumour_profile, seed=9_701,
+        read_groups=("Library_A", "Library_B", "Library_C"),
     )
     write_insertion_bam(ALIGNMENTS_DIR / "demo_insertions.bam")
     cnv_reference = write_cnv_reference(CNV_REFERENCE_PATH)

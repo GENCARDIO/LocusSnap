@@ -207,6 +207,7 @@ class AlignedRead:
         self, segment: pysam.AlignedSegment,
         reference: Optional[ReferenceWindow] = None,
         haplotype_tag: str = "HP", phase_set_tag: str = "PS",
+        read_tag: Optional[str] = None,
     ):
         self.segment = segment
         seg = segment
@@ -230,6 +231,10 @@ class AlignedRead:
         self.flag = seg.flag
         self.haplotype = str(seg.get_tag(haplotype_tag)) if seg.has_tag(haplotype_tag) else None
         self.phase_set = str(seg.get_tag(phase_set_tag)) if seg.has_tag(phase_set_tag) else None
+        self.read_tag = read_tag
+        self.tag_value = (
+            str(seg.get_tag(read_tag)) if read_tag and seg.has_tag(read_tag) else None
+        )
 
         # --- pair orientation / discordance (see compute_pair_orientation) ---
         has_mapped_mate = seg.is_paired and not seg.mate_is_unmapped
@@ -401,6 +406,8 @@ def fetch_reads(
     haplotype_tag: str = "HP",
     phase_set_tag: str = "PS",
     haplotype_filter: Optional[List[str]] = None,
+    read_tag: Optional[str] = None,
+    tag_filter: Optional[List[str]] = None,
 ) -> List[AlignedRead]:
     """Fetch + filter + featurize every alignment overlapping [start, end).
 
@@ -426,10 +433,15 @@ def fetch_reads(
             read = AlignedRead(
                 segment, reference,
                 haplotype_tag=haplotype_tag, phase_set_tag=phase_set_tag,
+                read_tag=read_tag,
             )
             if haplotype_filter:
                 haplotype_value = read.haplotype if read.haplotype is not None else "untagged"
                 if haplotype_value not in haplotype_filter:
+                    continue
+            if tag_filter:
+                tag_value = read.tag_value if read.tag_value is not None else "untagged"
+                if tag_value not in tag_filter:
                     continue
             reads.append(read)
 
