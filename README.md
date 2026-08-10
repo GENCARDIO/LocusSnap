@@ -668,6 +668,31 @@ Run this for the full option list:
 locus-snap --help
 ```
 
+## Test supported Python versions with Tox
+
+Install the development tools and run the complete Python 3.9–3.14 matrix:
+
+```bash
+python3 -m pip install -e '.[dev]'
+tox run
+```
+
+Tox creates isolated environments, builds and installs the package wheel, and
+runs the complete pytest suite in each available interpreter. Missing local
+interpreters are reported and skipped. Run one version or pass pytest options
+after `--`:
+
+```bash
+tox run -e py312
+tox run -e py310 -- -k highlight
+```
+
+When several interpreters are installed, run them concurrently with:
+
+```bash
+tox run-parallel --parallel all
+```
+
 ## Performance: what happens on large windows
 
 - Coverage is binned to the physical image width. Wide windows do not create

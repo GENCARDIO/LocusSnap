@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="LocusSnap creates publication-ready, IGV-like genomic snapshots from indexed BAM files.">
+    <meta name="theme-color" content="#12202d">
+    <meta property="og:title" content="LocusSnap — genomic snapshots from the command line">
+    <meta property="og:description" content="Turn indexed BAM files into clear, configurable genomic figures without opening a genome browser.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://gencardio.github.io/LocusSnap/">
+    <meta property="og:image" content="https://gencardio.github.io/LocusSnap/assets/images/default-refseq-isoforms.png">
+    <link rel="canonical" href="https://gencardio.github.io/LocusSnap/">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <title>LocusSnap — genomic snapshots from the command line</title>
+    <script>
+      document.documentElement.dataset.theme = localStorage.getItem("locus-theme") || "light";
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header" data-header>
+      <div class="nav-shell">
+        <a class="brand" href="#top" aria-label="LocusSnap home">
+          <img src="assets/favicon.svg" alt="" width="36" height="36">
+          <span>LocusSnap</span>
+        </a>
+
+        <button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false" data-menu-toggle>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+
+        <nav class="site-nav" aria-label="Main navigation" data-menu>
+          <a href="#features">Features</a>
+          <a href="#gallery">Gallery</a>
+          <a href="#quickstart">Quick start</a>
+          <a href="https://github.com/GENCARDIO/LocusSnap#options-people-use-most">Documentation</a>
+        </nav>
+
+        <div class="nav-actions">
+          <button class="icon-button theme-toggle" type="button" aria-label="Use dark theme" title="Change colour theme" data-theme-toggle>
+            <svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+            <svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg>
+          </button>
+          <a class="button button-small button-ghost" href="https://github.com/GENCARDIO/LocusSnap" aria-label="View LocusSnap on GitHub">
+            GitHub
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-grid page-shell">
+          <div class="hero-copy">
+            <p class="eyebrow"><span class="status-dot"></span> Version 0.2.0 · Open source</p>
+            <h1>Genomic evidence,<br><span>ready to share.</span></h1>
+            <p class="hero-lede">Create clear, IGV-like snapshots from indexed BAM files—complete with alignments, coverage, variants, genes, companion tracks, and publication-ready styling.</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="#quickstart">Get started</a>
+              <a class="button button-secondary" href="#gallery">Explore examples</a>
+            </div>
+            <div class="install-strip" aria-label="Install command">
+              <span class="prompt" aria-hidden="true">$</span>
+              <code>pip install locus-snap</code>
+              <button type="button" data-copy="pip install locus-snap" aria-label="Copy install command">
+                <svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                <svg class="check-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="hero-visual">
+            <div class="plot-window">
+              <div class="plot-toolbar">
+                <div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+                <span>chr7:55,086,724–55,086,934</span>
+                <span class="toolbar-badge">211 bp</span>
+              </div>
+              <img src="assets/images/default-refseq-isoforms.png" alt="LocusSnap output showing gene isoforms, coverage, and aligned sequencing reads" width="1400" height="845">
+            </div>
+            <div class="base-key" aria-label="IGV base colours">
+              <span><i class="base-a">A</i> Adenine</span>
+              <span><i class="base-c">C</i> Cytosine</span>
+              <span><i class="base-g">G</i> Guanine</span>
+              <span><i class="base-t">T</i> Thymine</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof-strip" aria-label="Project highlights">
+        <div class="page-shell proof-grid">
+          <div><strong>Python 3.9+</strong><span>tested with Tox</span></div>
+          <div><strong>7 formats</strong><span>PNG to vector PDF/SVG</span></div>
+          <div><strong>IGV-like</strong><span>familiar evidence display</span></div>
+          <div><strong>MIT licensed</strong><span>open and extensible</span></div>
+        </div>
+      </section>
+
+      <section class="section page-shell" id="features">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Designed for genomic review</p>
+            <h2>One command. A complete locus.</h2>
+          </div>
+          <p>Bring the evidence that matters into a consistent figure—without manually arranging screenshots or leaving your analysis workflow.</p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card feature-wide">
+            <div class="feature-icon alignment-icon" aria-hidden="true"><span></span><span></span><span></span></div>
+            <p class="card-kicker">Alignment evidence</p>
+            <h3>See what the reads are saying</h3>
+            <p>Inspect concordant and discordant pairs, split reads, soft clips, gaps, insertions, and base mismatches with familiar IGV colours.</p>
+            <ul class="tag-list" aria-label="Alignment features">
+              <li>View as pairs</li><li>Mate windows</li><li>MAPQ shading</li><li>Read sorting</li>
+            </ul>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon coverage-icon" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+            <p class="card-kicker">Quantitative context</p>
+            <h3>Coverage, VAF, BAF &amp; CNV</h3>
+            <p>Combine read evidence with coverage allele fractions, copy-number states, and variant companions.</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon tracks-icon" aria-hidden="true"><span></span><span></span><span></span></div>
+            <p class="card-kicker">Companion tracks</p>
+            <h3>Genes and annotations</h3>
+            <p>Add RefSeq isoforms, GTF/GFF, BED, VCF, peak, and signal tracks with configurable labels and heights.</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon zoom-icon" aria-hidden="true">A<span>C</span>G<i>T</i></div>
+            <p class="card-kicker">Close inspection</p>
+            <h3>Nucleotide-level zoom</h3>
+            <p>At small windows, display reference bases, mismatches, individual soft-clipped nucleotides, and insertion lengths.</p>
+          </article>
+
+          <article class="feature-card feature-wide styling-card">
+            <div>
+              <p class="card-kicker">Figure control</p>
+              <h3>Style the evidence, not a screenshot</h3>
+              <p>Use YAML presets or command-line options for track sizes, legends, grids, titles, highlighted spans, colours, resolution, and output format.</p>
+            </div>
+            <div class="style-swatch" aria-hidden="true">
+              <span style="--swatch:#46b97a"></span><span style="--swatch:#4c7edb"></span><span style="--swatch:#dca53a"></span><span style="--swatch:#d95d55"></span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section gallery-section" id="gallery">
+        <div class="page-shell">
+          <div class="section-heading gallery-heading">
+            <div>
+              <p class="eyebrow">Selected output</p>
+              <h2>From locus to figure.</h2>
+            </div>
+            <p>These examples are generated by LocusSnap from its reproducible demonstration data. Select a figure to inspect it at full resolution.</p>
+          </div>
+
+          <div class="gallery-grid">
+            <button class="gallery-card gallery-feature" type="button" data-gallery-image="assets/images/structural-variant-evidence.png" data-gallery-title="Structural variant evidence">
+              <span class="gallery-image"><img src="assets/images/structural-variant-evidence.png" alt="Two-panel structural variant evidence plot" width="2400" height="730" loading="lazy"></span>
+              <span class="gallery-meta"><span><strong>Structural variant evidence</strong><small>Mate windows · split reads · discordant pairs</small></span><i aria-hidden="true">↗</i></span>
+            </button>
+
+            <button class="gallery-card" type="button" data-gallery-image="assets/images/close-zoom-softclipped-bases.png" data-gallery-title="Soft-clipped bases at close zoom">
+              <span class="gallery-image"><img src="assets/images/close-zoom-softclipped-bases.png" alt="Close zoom plot showing coloured soft-clipped nucleotides on reads" width="1500" height="395" loading="lazy"></span>
+              <span class="gallery-meta"><span><strong>Soft-clipped bases</strong><small>Individual nucleotides at close zoom</small></span><i aria-hidden="true">↗</i></span>
+            </button>
+
+            <button class="gallery-card" type="button" data-gallery-image="assets/images/close-zoom-insertions.png" data-gallery-title="Insertions at close zoom">
+              <span class="gallery-image"><img src="assets/images/close-zoom-insertions.png" alt="Close zoom plot showing insertion markers and lengths" width="1500" height="471" loading="lazy"></span>
+              <span class="gallery-meta"><span><strong>Insertion evidence</strong><small>CIGAR insertion markers and lengths</small></span><i aria-hidden="true">↗</i></span>
+            </button>
+
+            <button class="gallery-card gallery-tall" type="button" data-gallery-image="assets/images/multi-bam-vcf-companions.png" data-gallery-title="Multi-sample companion tracks">
+              <span class="gallery-image"><img src="assets/images/multi-bam-vcf-companions.png" alt="Multi-sample plot with companion VCF tracks" width="2100" height="1539" loading="lazy"></span>
+              <span class="gallery-meta"><span><strong>Multi-sample comparison</strong><small>Repeated BAM and VCF companions</small></span><i aria-hidden="true">↗</i></span>
+            </button>
+
+            <button class="gallery-card gallery-large" type="button" data-gallery-image="assets/images/variant-evidence-baf-loh.png" data-gallery-title="BAF and LOH evidence">
+              <span class="gallery-image"><img src="assets/images/variant-evidence-baf-loh.png" alt="Plot showing balanced BAF, copy-number gain, and loss of heterozygosity" width="1960" height="772" loading="lazy"></span>
+              <span class="gallery-meta"><span><strong>BAF and LOH</strong><small>Loss, gain, and allelic imbalance</small></span><i aria-hidden="true">↗</i></span>
+            </button>
+
+            <button class="gallery-card gallery-large" type="button" data-gallery-image="assets/images/rnaseq-sashimi.png" data-gallery-title="RNA-seq sashimi plot">
+              <span class="gallery-image"><img src="assets/images/rnaseq-sashimi.png" alt="RNA-seq sashimi plot with splice junction arcs" width="1960" height="1089" loading="lazy"></span>
+              <span class="gallery-meta"><span><strong>RNA-seq sashimi</strong><small>Splice junctions and transcript context</small></span><i aria-hidden="true">↗</i></span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section page-shell" id="quickstart">
+        <div class="quickstart-grid">
+          <div class="quickstart-copy">
+            <p class="eyebrow">Quick start</p>
+            <h2>From BAM to snapshot in seconds.</h2>
+            <p>Install from PyPI, point LocusSnap at an indexed BAM, choose a 1-based inclusive region, and write the result to your output directory.</p>
+            <ol class="steps">
+              <li><span>1</span><div><strong>Install the package</strong><small>Python 3.9 or newer</small></div></li>
+              <li><span>2</span><div><strong>Index your BAM</strong><small>Run <code>samtools index sample.bam</code> if needed</small></div></li>
+              <li><span>3</span><div><strong>Render the locus</strong><small>PNG is the default; vector formats are available</small></div></li>
+            </ol>
+            <a class="text-link" href="https://github.com/GENCARDIO/LocusSnap#basic-usage">Read the complete documentation <span aria-hidden="true">→</span></a>
+          </div>
+
+          <div class="code-window">
+            <div class="code-header">
+              <span>Terminal</span>
+              <button type="button" data-copy="pip install locus-snap&#10;&#10;locus-snap \&#10;  --bam sample.bam \&#10;  --region chr9:101867481-101867620 \&#10;  --output_dir out \&#10;  --output_name locus" aria-label="Copy quick-start commands">
+                <svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                <svg class="check-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre><code><span class="code-comment"># Install from PyPI</span>
+<span class="code-command">pip install</span> locus-snap
+
+<span class="code-comment"># Render an indexed BAM</span>
+<span class="code-command">locus-snap</span> <span class="code-flag">\</span>
+  <span class="code-flag">--bam</span> sample.bam <span class="code-flag">\</span>
+  <span class="code-flag">--region</span> chr9:101867481-101867620 <span class="code-flag">\</span>
+  <span class="code-flag">--output_dir</span> out <span class="code-flag">\</span>
+  <span class="code-flag">--output_name</span> locus</code></pre>
+            <div class="code-result"><span></span> Saved <code>out/locus.png</code></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta-section">
+        <div class="page-shell cta-card">
+          <div>
+            <p class="eyebrow">Ready when your BAM is</p>
+            <h2>Make your next locus easier to read.</h2>
+            <p>Install LocusSnap from PyPI or explore the source, examples, and full option reference on GitHub.</p>
+          </div>
+          <div class="cta-actions">
+            <a class="button button-primary" href="https://pypi.org/project/locus-snap/">View on PyPI</a>
+            <a class="button button-secondary" href="https://github.com/GENCARDIO/LocusSnap">Browse source</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="page-shell footer-grid">
+        <div>
+          <a class="brand footer-brand" href="#top"><img src="assets/favicon.svg" alt="" width="32" height="32"><span>LocusSnap</span></a>
+          <p>IGV-like genomic snapshots from the command line.</p>
+        </div>
+        <nav aria-label="Footer navigation">
+          <a href="https://github.com/GENCARDIO/LocusSnap">GitHub</a>
+          <a href="https://pypi.org/project/locus-snap/">PyPI</a>
+          <a href="https://github.com/GENCARDIO/LocusSnap/issues">Issues</a>
+          <a href="https://github.com/GENCARDIO/LocusSnap/blob/main/LICENSE">MIT License</a>
+        </nav>
+        <p class="copyright">© <span data-year>2026</span> GENCARDIO</p>
+      </div>
+    </footer>
+
+    <dialog class="lightbox" data-lightbox aria-labelledby="lightbox-title">
+      <div class="lightbox-bar">
+        <strong id="lightbox-title" data-lightbox-title>Figure preview</strong>
+        <button type="button" aria-label="Close figure preview" data-lightbox-close>×</button>
+      </div>
+      <div class="lightbox-canvas"><img src="" alt="" data-lightbox-image></div>
+    </dialog>
+
+    <div class="toast" role="status" aria-live="polite" data-toast>Copied to clipboard</div>
+    <script src="assets/site.js"></script>
+  </body>
+</html>

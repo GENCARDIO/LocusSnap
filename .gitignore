@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.tox/
 locus_snap/data/ucsc/refseq/
 build/
 dist/

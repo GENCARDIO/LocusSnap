@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "locus-snap"
-version = "0.1.0"
+version = "0.2.0"
 description = "Render IGV-like genomic snapshots from an indexed BAM without opening a genome browser."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 authors = [{ name = "bdolmo" }]
 keywords = ["bioinformatics", "genomics", "bam", "igv", "sequencing", "visualization"]
@@ -15,7 +16,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
@@ -30,6 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "tox>=4.4"]
 
 [project.scripts]
 locus-snap = "locus_snap.cli:main"
