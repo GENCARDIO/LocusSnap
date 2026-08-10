@@ -247,6 +247,22 @@ def test_parser_accepts_repeated_bams_labels_and_vcf_companions():
     assert args.vcf_companion == ["tumour.vcf.gz", "none", "relapse.vcf.gz"]
 
 
+def test_parser_accepts_repeated_regions_labels_and_breakpoint_links():
+    parser = build_parser()
+    args = parser.parse_args([
+        "--bam", "tumour.bam",
+        "--region", "chr3:100-200",
+        "--region", "chr8:300-450",
+        "--region_label", "Left breakpoint",
+        "--region_label", "Right breakpoint",
+        "--link_breakpoints",
+    ])
+
+    assert args.region == ["chr3:100-200", "chr8:300-450"]
+    assert args.region_label == ["Left breakpoint", "Right breakpoint"]
+    assert args.link_breakpoints
+
+
 @pytest.mark.parametrize(
     "yaml_text, message",
     [

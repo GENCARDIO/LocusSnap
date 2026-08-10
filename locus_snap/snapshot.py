@@ -467,6 +467,236 @@ class BamSnapshot:
         return self.summary
 
 
+def render_multi_locus_snapshots(
+    bam_paths: List[str],
+    regions: List[tuple[str, int, int]],
+    fasta: Optional[str] = None,
+    output_dir: str = ".",
+    output_name: Optional[str] = None,
+    sample_labels: Optional[List[str]] = None,
+    region_labels: Optional[List[str]] = None,
+    layout: str = "pack",
+    sort_by: str = "gap_length",
+    sort_base_position: Optional[int] = None,
+    descending: bool = True,
+    min_mapq: int = 0,
+    include_secondary: bool = False,
+    include_supplementary: bool = True,
+    include_duplicates: bool = False,
+    max_rows: Optional[int] = None,
+    show_alignments: bool = True,
+    show_coverage: bool = True,
+    show_legend: bool = True,
+    annotate_gap: bool = True,
+    fig_width: float = 14.0,
+    dpi: int = 150,
+    long_gap_threshold: int = 10,
+    only_types: Optional[List[str]] = None,
+    min_softclip: int = 1,
+    insert_size_sigma: float = 3.0,
+    pair_colors: bool = True,
+    shade_by_mapq: bool = True,
+    mapq_cap: int = 60,
+    alignment_colors: Optional[Dict[str, Optional[str]]] = None,
+    visual_config: Optional[Dict[str, Any]] = None,
+    display_mode: str = "expand",
+    max_alignment_depth: int = DEFAULT_MAX_ALIGNMENT_DEPTH,
+    annotation_sources: Optional[List[AnnotationSource]] = None,
+    show_ideogram: bool = True,
+    show_center_guide: bool = False,
+    show_sashimi: bool = False,
+    min_junction_reads: int = 1,
+    sashimi_strand: str = "combined",
+    genome: str = "auto",
+    cytoband_file: Optional[str] = None,
+    max_reference_span: int = DEFAULT_MAX_REFERENCE_SPAN,
+    view_as_pairs: bool = False,
+    coverage_vaf_threshold: float = DEFAULT_COVERAGE_VAF_THRESHOLD,
+    min_baseq: int = 0,
+    min_variant_mapq: int = 0,
+    show_variant_counts: bool = False,
+    show_indel_lengths: bool = False,
+    haplotype_view: str = "none",
+    haplotype_filter: Optional[List[str]] = None,
+    haplotype_tag: str = "HP",
+    phase_set_tag: str = "PS",
+    output_format: Optional[str] = None,
+    companion_vcfs: Optional[List[Optional[str]]] = None,
+    grid_mode: str = "major",
+    highlight_regions: Optional[List[HighlightRegion]] = None,
+    highlight_color: str = "#ffd54f",
+    highlight_alpha: float = 0.20,
+    title_align: str = "left",
+    link_breakpoints: bool = False,
+) -> tuple[str, str]:
+    """Render two or more explicit loci as columns for one or more BAMs."""
+    if len(regions) < 2:
+        raise ValueError("Explicit multi-locus view requires at least two regions.")
+    if not bam_paths:
+        raise ValueError("Explicit multi-locus view requires at least one BAM.")
+    os.makedirs(output_dir, exist_ok=True)
+
+    labels = list(sample_labels or [])
+    if len(labels) > len(bam_paths):
+        raise ValueError("More sample labels were supplied than BAMs.")
+    while len(labels) < len(bam_paths):
+        labels.append(Path(bam_paths[len(labels)]).stem)
+
+    locus_labels = list(region_labels or [])
+    if len(locus_labels) > len(regions):
+        raise ValueError("More region labels were supplied than regions.")
+    while len(locus_labels) < len(regions):
+        locus_labels.append(f"Locus {len(locus_labels) + 1}")
+
+    companions = list(companion_vcfs or [])
+    if companions and len(companions) != len(bam_paths):
+        raise ValueError("Exactly one VCF companion is required per BAM panel.")
+    if not companions:
+        companions = [None] * len(bam_paths)
+
+    with open_alignment_file(bam_paths[0], reference=fasta) as bam_file:
+        contig_lengths = dict(zip(bam_file.references, bam_file.lengths))
+    if show_ideogram:
+        cytobands, assembly_label = resolve_cytobands(
+            contig_lengths, genome=genome, custom_path=cytoband_file
+        )
+    else:
+        cytobands = {}
+        assembly_label = None
+
+    companion_sources = []
+    for sample_index, companion_path in enumerate(companions):
+        if not companion_path:
+            companion_sources.append(None)
+            continue
+        theme_track_colors = visual_config.get("track_colors") if visual_config else None
+        companion_sources.append(AnnotationSource(
+            companion_path, label=f"{labels[sample_index]} variants", kind="vcf",
+            display_mode="collapse", track_colors=theme_track_colors,
+        ))
+
+    loci = []
+    summaries = []
+    for locus_index, (chrom, start, end) in enumerate(regions):
+        reference = ReferenceWindow(fasta, chrom, start, end)
+        base_position = sort_base_position
+        if sort_by == "base" and base_position is None:
+            base_position = start + (end - start) // 2
+        reference_base = (
+            reference.base_at(base_position) if base_position is not None else None
+        )
+        genomic_tracks = [
+            source.fetch(chrom, start, end) for source in annotation_sources or []
+        ]
+        samples = []
+        for sample_index, bam_path in enumerate(bam_paths):
+            sample_label = labels[sample_index]
+            reads = fetch_reads(
+                bam_path, chrom, start, end, reference=reference,
+                min_mapq=min_mapq, include_secondary=include_secondary,
+                include_supplementary=include_supplementary,
+                include_duplicates=include_duplicates,
+                insert_size_sigma=insert_size_sigma, only_types=only_types,
+                min_softclip=min_softclip, haplotype_tag=haplotype_tag,
+                phase_set_tag=phase_set_tag, haplotype_filter=haplotype_filter,
+            )
+            sample_reference_base = reference_base
+            if sort_by == "base" and sample_reference_base not in ("A", "C", "G", "T"):
+                sample_reference_base = infer_reference_base(reads, base_position)
+            priority_names = set()
+            if sort_by == "base":
+                for read in reads:
+                    observed = read.base_at(base_position)
+                    if observed in ("A", "C", "G", "T") and (
+                        sample_reference_base not in ("A", "C", "G", "T")
+                        or observed != sample_reference_base
+                    ):
+                        priority_names.add(read.query_name)
+            display_reads, downsampled = downsample_reads(
+                reads, max_depth=max_alignment_depth,
+                priority_names=priority_names, preserve_pairs=view_as_pairs,
+            )
+            rows = build_rows(
+                display_reads, layout=layout, sort_by=sort_by,
+                descending=descending, display_mode=display_mode,
+                view_as_pairs=view_as_pairs, haplotype_view=haplotype_view,
+                base_position=base_position, reference_base=sample_reference_base,
+            )
+            rows, dropped = truncate_rows(rows, max_rows)
+            summary = summarize(
+                reads, label=f"{sample_label} · {locus_labels[locus_index]}",
+                long_gap_threshold=long_gap_threshold, min_softclip=min_softclip,
+            )
+            summaries.append(summary)
+            companion_tracks = []
+            if companion_sources[sample_index] is not None:
+                companion_tracks.append(
+                    companion_sources[sample_index].fetch(chrom, start, end)
+                )
+            samples.append({
+                "label": (
+                    f"{sample_label} (n={len(reads)}, gapped={summary.n_gapped}, "
+                    f"max_gap={summary.max_gap}bp)"
+                ),
+                "rows": rows,
+                "all_reads_for_coverage": reads,
+                "layout": layout,
+                "dropped_reads": dropped,
+                "downsampled_reads": downsampled,
+                "sort_base_position": base_position,
+                "sort_reference_base": sample_reference_base,
+                "companion_tracks": companion_tracks,
+            })
+        loci.append({
+            "label": locus_labels[locus_index],
+            "chrom": chrom,
+            "start": start,
+            "end": end,
+            "reference": reference,
+            "genomic_tracks": genomic_tracks,
+            "contig_length": contig_lengths.get(chrom),
+            "cytobands": bands_for_chrom(cytobands, chrom),
+            "samples": samples,
+        })
+
+    first_chrom, first_start, first_end = regions[0]
+    out_path = resolve_output_path(
+        output_dir, output_name,
+        f"loci_{first_chrom}_{first_start}_{first_end}_{len(regions)}panels",
+        output_format,
+    )
+    renderer = AlignmentRenderer(
+        fig_width=fig_width, dpi=dpi, show_alignments=show_alignments,
+        show_coverage=show_coverage, show_legend=show_legend,
+        grid_mode=grid_mode, annotate_gap=annotate_gap,
+        highlight_regions=highlight_regions, highlight_color=highlight_color,
+        highlight_alpha=highlight_alpha, title_align=title_align,
+        pair_colors=pair_colors, shade_by_mapq=shade_by_mapq, mapq_cap=mapq_cap,
+        alignment_colors=alignment_colors, visual_config=visual_config,
+        display_mode=display_mode, show_ideogram=show_ideogram,
+        max_reference_span=max_reference_span, view_as_pairs=view_as_pairs,
+        coverage_vaf_threshold=coverage_vaf_threshold, min_baseq=min_baseq,
+        min_variant_mapq=min_variant_mapq,
+        show_variant_counts=show_variant_counts,
+        show_indel_lengths=show_indel_lengths,
+        haplotype_view=haplotype_view,
+        sort_base_position=None, sort_reference_base=None,
+        show_center_guide=show_center_guide, show_sashimi=show_sashimi,
+        min_junction_reads=min_junction_reads, sashimi_strand=sashimi_strand,
+    )
+    renderer.render_multi_loci(
+        loci=loci, out_path=out_path,
+        suptitle=(
+            f"{len(regions)}-locus view · display={display_mode}, layout={layout}, "
+            f"view={'pairs' if view_as_pairs else 'alignments'}, "
+            f"sort_by={sort_by} ({'desc' if descending else 'asc'})"
+        ),
+        assembly_label=assembly_label,
+        link_breakpoints=link_breakpoints,
+    )
+    return out_path, format_summary_table(summaries)
+
+
 def compare_snapshots(
     bam1: str,
     bam2: str,

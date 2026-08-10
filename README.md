@@ -146,6 +146,13 @@ Click any preview for the full-resolution figure.
       <sub>Short CIGAR insertions appear as narrow purple breakpoint markers with a white I, matching IGV.</sub>
     </td>
   </tr>
+  <tr>
+    <td colspan="2">
+      <a href="out/34_explicit_multilocus_breakpoint.png"><img src="out/34_explicit_multilocus_breakpoint.png" alt="Explicit chr1 and chr2 breakpoint loci displayed as independently scaled linked columns"></a><br>
+      <strong>Explicit multi-locus breakpoint view</strong><br>
+      <sub>Repeated regions create independently scaled columns; breakpoint centres are linked while reciprocal chr1–chr2 pairs, split reads, soft clips, coverage, and VCF breakends remain aligned.</sub>
+    </td>
+  </tr>
 </table>
 
 The synthetic examples use expanded, deterministic datasets: 240 tumour, 180
@@ -297,6 +304,31 @@ locus-snap \
 Candidates are grouped by chromosome. The busiest chromosome is selected and
 the panel is centered on the mean candidate position. Set its width with
 `--mate_window_size BP`. Mate view currently accepts one BAM.
+
+### Explicit multi-locus breakpoint view
+
+Repeat `--region` to place two or more independently scaled loci in adjacent
+columns. Repeat `--region_label` for descriptive panel headings and add
+`--link_breakpoints` to connect the centre of each neighbouring locus:
+
+```bash
+locus-snap \
+  --bam tumour.bam \
+  --region chr3:187721000-187721500 \
+  --region chr8:128747000-128747500 \
+  --region_label 'Primary breakpoint' \
+  --region_label 'Partner breakpoint' \
+  --link_breakpoints \
+  --view_as_pairs \
+  --output_name explicit-breakpoints
+```
+
+Each column has its own coordinate ticks, scale ruler, reference bases,
+ideogram marker, highlights, and annotation fetch. Repeated `--bam` inputs are
+stacked within every locus, so the same layout supports tumour/normal or
+longitudinal comparisons. With `--sort_by base`, each locus sorts at its own
+centre. An explicit `--sort_base_position` and metrics TSV export are not yet
+supported when more than one region is supplied.
 
 ### Sort reads carrying an SNV
 
@@ -729,7 +761,9 @@ CIGAR insertion and deletion lengths are hidden by default. Show them with
 | Option | Purpose |
 |---|---|
 | `--bam BAM` | indexed BAM or CRAM input; repeat for multiple samples |
-| `--region chr:start-end` | 1-based inclusive window |
+| `--region chr:start-end` | 1-based inclusive window; repeat for explicit multi-locus columns |
+| `--region_label LABEL` | label the corresponding repeated region |
+| `--link_breakpoints` | connect adjacent multi-locus panel centres |
 | `--batch_regions BED\|VCF` | render every region in a BED file, or every variant in a VCF (single BAM) |
 | `--report [NAME.html]` | self-contained HTML report for `--batch_regions` |
 | `--fasta FASTA` | reference bases, mismatches, and coverage VAF |
