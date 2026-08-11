@@ -58,6 +58,8 @@ class AnnotationItem:
     chrom2: str = ""
     start2: Optional[int] = None
     end2: Optional[int] = None
+    haplotype: str = ""
+    phase_set: str = ""
 
 
 @dataclass
@@ -427,7 +429,13 @@ def parse_bed(lines: Iterable[str], chrom: str, start: int, end: int) -> List[An
 
 
 def parse_vcf(lines: Iterable[str], chrom: str, start: int, end: int) -> List[AnnotationItem]:
-    """Convert VCF records into zero-based annotation intervals."""
+    """Convert VCF records into zero-based, phase-aware annotation intervals.
+
+    When the first sample has a phased ``GT``, the alternate-bearing phase is
+    retained on the item. ``PS`` and the optional ``STAR``/``HAPLOTYPE`` and
+    ``ROLE`` INFO fields are also surfaced in the compact display label. Plain
+    sites retain their historical ID-only labels.
+    """
     items = []
     for line in lines:
         fields = line.rstrip().split("\t")
@@ -440,8 +448,12 @@ def parse_vcf(lines: Iterable[str], chrom: str, start: int, end: int) -> List[An
         reference = fields[3]
         alternate = fields[4]
         variant_end = variant_start + max(len(reference), 1)
+        info = {}
         if len(fields) > 7:
             for info_field in fields[7].split(";"):
+                key, separator, value = info_field.partition("=")
+                if separator:
+                    info[key] = value
                 if info_field.startswith("END="):
                     try:
                         variant_end = max(variant_end, int(info_field[4:]))
@@ -453,9 +465,36 @@ def parse_vcf(lines: Iterable[str], chrom: str, start: int, end: int) -> List[An
         if variant_end <= start or variant_start >= end:
             continue
         identifier = fields[2] if fields[2] != "." else f"{reference}>{alternate}"
+        haplotype = ""
+        phase_set = ""
+        if len(fields) >= 10:
+            format_keys = fields[8].split(":")
+            sample_values = fields[9].split(":")
+            sample_data = dict(zip(format_keys, sample_values))
+            genotype = sample_data.get("GT", "")
+            if "|" in genotype:
+                alternate_haplotypes = []
+                for haplotype_index, allele in enumerate(genotype.split("|"), 1):
+                    if allele not in ("", ".", "0"):
+                        alternate_haplotypes.append(str(haplotype_index))
+                haplotype = "+".join(alternate_haplotypes)
+                phase_set = sample_data.get("PS", "")
+
+        label_parts = [identifier]
+        if haplotype:
+            label_parts.append(f"HP{haplotype}")
+        star_allele = info.get("STAR") or info.get("HAPLOTYPE")
+        if star_allele:
+            label_parts.append(star_allele.replace("CYP2D6", ""))
+        if info.get("ROLE", "").lower() == "core":
+            label_parts.append("core")
+        effect = info.get("EFFECT", "")
+        if effect:
+            label_parts.append(effect.replace("_", " "))
         items.append(AnnotationItem(
-            start=variant_start, end=variant_end, name=identifier,
+            start=variant_start, end=variant_end, name=" · ".join(label_parts),
             blocks=[(variant_start, variant_end)],
+            haplotype=haplotype, phase_set=phase_set,
         ))
     return items
 

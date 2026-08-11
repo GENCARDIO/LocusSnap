@@ -1770,12 +1770,18 @@ class AlignmentRenderer:
             # Reserve the upper quarter of each row for the feature name.
             center = row_index + 0.64
             for item in row:
+                feature_color = track.color
+                if track.kind == "vcf" and item.haplotype:
+                    feature_color = haplotype_color(
+                        item.haplotype, self.haplotype_colors,
+                        self.chromosome_palette,
+                    )
                 line_start = max(item.start, window_start)
                 line_end = min(item.end, window_end)
                 if line_start >= line_end:
                     continue
                 ax.plot(
-                    [line_start, line_end], [center, center], color=track.color,
+                    [line_start, line_end], [center, center], color=feature_color,
                     linewidth=(
                         self.styles["primary_gene_line_width"] if item.primary_rank is not None
                         else self.styles["gene_line_width"]
@@ -1787,7 +1793,7 @@ class AlignmentRenderer:
                     if lo < hi:
                         ax.add_patch(Rectangle(
                             (lo, center - 0.23), hi - lo, 0.46,
-                            facecolor=track.color, edgecolor=track.color,
+                            facecolor=feature_color, edgecolor=feature_color,
                             linewidth=self.styles["annotation_edge_width"], zorder=3,
                         ))
                 for utr_start, utr_end in item.utrs:
@@ -1795,7 +1801,7 @@ class AlignmentRenderer:
                     if lo < hi:
                         ax.add_patch(Rectangle(
                             (lo, center - 0.12), hi - lo, 0.24,
-                            facecolor=track.color, edgecolor=track.color,
+                            facecolor=feature_color, edgecolor=feature_color,
                             linewidth=self.styles["annotation_edge_width"], zorder=3,
                         ))
 
@@ -1861,19 +1867,23 @@ class AlignmentRenderer:
                             ax.plot(
                                 position, center, marker=marker,
                                 markersize=self.styles["gene_arrow_size"],
-                                color=track.color, markeredgewidth=0, zorder=4,
+                                color=feature_color, markeredgewidth=0, zorder=4,
                             )
                 elif item.strand == "+" and item.end <= window_end:
                     ax.plot(item.end, center, marker=">",
                             markersize=self.styles["gene_arrow_size"],
-                            color=track.color, markeredgewidth=0, zorder=4)
+                            color=feature_color, markeredgewidth=0, zorder=4)
                 elif item.strand == "-" and item.start >= window_start:
                     ax.plot(item.start, center, marker="<",
                             markersize=self.styles["gene_arrow_size"],
-                            color=track.color, markeredgewidth=0, zorder=4)
+                            color=feature_color, markeredgewidth=0, zorder=4)
 
                 visible_fraction = (line_end - line_start) / max(window_end - window_start, 1)
                 name_capacity = int(visible_fraction * 105)
+                if track.kind == "vcf":
+                    # Variant glyphs are usually one base wide, but their IDs,
+                    # phase and consequence remain useful at gene-scale zoom.
+                    name_capacity = 48
                 if track.display_mode == "collapse":
                     item_label = item.group_label or item.name
                 else:
@@ -1890,9 +1900,18 @@ class AlignmentRenderer:
                     item_label += " ★"
                 display_name = ellipsize(item_label, name_capacity) if name_capacity >= 4 else ""
                 if display_name:
+                    label_position = line_start
+                    label_alignment = "left"
+                    if (
+                        track.kind == "vcf"
+                        and line_start > window_start + 0.72 * (window_end - window_start)
+                    ):
+                        label_position = line_end
+                        label_alignment = "right"
                     ax.text(
-                        line_start, row_index + 0.05, display_name, ha="left", va="top",
-                        fontsize=5.5, color=track.color, clip_on=True, zorder=5,
+                        label_position, row_index + 0.05, display_name,
+                        ha=label_alignment, va="top",
+                        fontsize=5.5, color=feature_color, clip_on=True, zorder=5,
                     )
 
     def draw_hic_track(

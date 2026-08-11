@@ -581,6 +581,25 @@ def test_plain_vcf_uses_zero_based_spans_ids_and_info_end(tmp_path):
     ]
 
 
+def test_vcf_surfaces_phased_haplotype_star_allele_and_core_role(tmp_path):
+    vcf = tmp_path / "phased.vcf"
+    vcf.write_text(
+        "##fileformat=VCFv4.2\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n"
+        "chr22\t101\trs3892097\tC\tT\t.\tPASS\t"
+        "STAR=CYP2D6*4.001;ROLE=core;EFFECT=splice_defect\tGT:PS\t1|0:101\n",
+        encoding="utf-8",
+    )
+
+    item = AnnotationSource(str(vcf), "Phased variants").fetch(
+        "chr22", 90, 120
+    ).items[0]
+
+    assert item.name == "rs3892097 · HP1 · *4.001 · core · splice defect"
+    assert item.haplotype == "1"
+    assert item.phase_set == "101"
+
+
 def test_bgzip_vcf_is_fetched_through_tabix_index(tmp_path):
     plain = tmp_path / "variants.vcf"
     compressed = tmp_path / "variants.vcf.gz"

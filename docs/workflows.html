@@ -12,7 +12,7 @@
     <main id="main">
       <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Analysis</p><h1>Workflow guides</h1><p>Commands for small variants, structural events, RNA-seq, long reads, UMI families, cohorts, and chromatin contacts.</p></div></section>
       <div class="docs-layout">
-        <aside class="docs-sidebar"><p class="docs-sidebar-label">Documentation</p><nav><a href="getting-started.html">Getting started</a><a href="workflows.html" aria-current="page">Workflow guides</a><a href="recipes.html">Recipes</a><a href="configuration.html">Configuration</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><p class="docs-sidebar-label">Workflows</p><nav><a href="#small-variants">Small variants</a><a href="#structural-variants">Structural variants</a><a href="#rna">RNA-seq</a><a href="#long-reads">Long reads</a><a href="#molecules">UMI molecules</a><a href="#batch">Cohort reports</a><a href="#contacts">Hi-C contacts</a></nav></aside>
+        <aside class="docs-sidebar"><p class="docs-sidebar-label">Documentation</p><nav><a href="getting-started.html">Getting started</a><a href="workflows.html" aria-current="page">Workflow guides</a><a href="recipes.html">Recipes</a><a href="configuration.html">Configuration</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><p class="docs-sidebar-label">Workflows</p><nav><a href="#small-variants">Small variants</a><a href="#pharmacogenomics">Pharmacogenomics</a><a href="#structural-variants">Structural variants</a><a href="#rna">RNA-seq</a><a href="#long-reads">Long reads</a><a href="#molecules">UMI molecules</a><a href="#batch">Cohort reports</a><a href="#contacts">Hi-C contacts</a></nav></aside>
         <article class="docs-content">
           <p class="docs-lede">Keep windows narrow enough for base-level evidence. Apply <code>--config lab-style.yaml</code> to reuse colours, dimensions, and display defaults.</p>
           <div class="task-grid">
@@ -33,6 +33,23 @@
   --center_guide \
   --output_name snv-review</code></pre>
           <div class="callout"><strong>Base labels require close zoom.</strong><p>Reference and individual read bases appear only below <code>--max_reference_span</code>. The default threshold is 250 bp.</p></div>
+
+          <h2 id="pharmacogenomics">Phased pharmacogenomic star alleles</h2>
+          <p>This GRCh37 example models <strong>CYP2D6*4.001/*1</strong>. <code>wgsim</code> generates two 15× haplotypes as 2×150 bp reads with realistic insert-size and error distributions; BWA-MEM then maps them against the complete hg19 genome. MAPQ 0 primary alignments are deliberately retained, allowing CYP2D6/CYP2D7 homology to create uneven coverage and pale low-confidence read pairs. Five non-reference markers from the legacy *4A/*4.001 definition are phased as <code>1|0</code> and linked to HP1 through the same <code>PS</code> value.</p>
+          <pre><code>export LOCUSSNAP_HG19_FASTA=/path/to/ucsc.hg19.fasta
+python3 generate_demo_data.py
+locus-snap \
+  --bam out/demo_data/alignments/demo_cyp2d6_star4.bam \
+  --fasta out/demo_data/reference/demo_cyp2d6_reference.fa.gz \
+  --region chr22:42522001-42527200 \
+  --custom_track 'out/demo_data/annotations/demo_cyp2d6.gtf,gtf,CYP2D6 canonical transcript,#17217a,collapse,0.72' \
+  --custom_track 'out/demo_data/variants/demo_cyp2d6_star4.vcf.gz,vcf,Phased VCF · HP1 *4.001 (no function) / HP2 *1,#7a1f5c,expand,1.18' \
+  --haplotype_view split --haplotype_filter 1 2 \
+  --view_as_pairs --show_exon_numbers --min_mapq 0 \
+  --genome hg19 --refseq none \
+  --output_name 42_cyp2d6_star4_haplotype</code></pre>
+          <img src="assets/images/cyp2d6-star4-haplotype.png" alt="Synthetic CYP2D6 star 4.001 over star 1 locus with a phased VCF track, numbered exons, coverage, and HP1 and HP2 paired-read lanes" width="2400" height="961" loading="lazy">
+          <p>The allele naming follows <a href="https://www.pharmvar.org/gene/CYP2D6">PharmVar</a>. The figure is an educational visualization, not a star-allele calling or clinical phenotype report.</p>
 
           <h2 id="structural-variants">Structural variants and translocations</h2>
           <h3>Pair evidence within one locus</h3>

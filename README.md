@@ -365,6 +365,25 @@ locus-snap \
 phase-set information from `PS`. Override the tags with `--haplotype_tag` and
 `--phase_set_tag`.
 
+Phased sample genotypes in a VCF track are also haplotype-aware. For example,
+`GT:PS=1|0:42524947` labels and colours the alternate allele as `HP1`, matching
+reads with `HP:i:1` and the same phase set. The deterministic
+[CYP2D6*4.001/*1 example](out/42_cyp2d6_star4_haplotype.png) combines five
+non-reference markers from the legacy *4A/*4.001 definition on GRCh37, a
+numbered canonical transcript, paired reads, coverage, and HP1/HP2 lanes.
+When an indexed hg19 FASTA and both `wgsim` and `bwa` are available, the
+generator simulates two 15× haplotypes and maps the resulting 2×150 bp reads
+to the complete genome. MAPQ 0 primary alignments are retained, so paralogous
+CYP2D6/CYP2D7 sequence produces the expected uneven coverage and pale
+low-confidence reads. Point to a non-standard reference location with
+`LOCUSSNAP_HG19_FASTA`:
+
+```bash
+export LOCUSSNAP_HG19_FASTA=/path/to/ucsc.hg19.fasta
+python3 generate_demo_data.py
+bash regenerate_demo_examples.sh
+```
+
 ### Group and colour reads by any BAM tag
 
 Separate reads into lanes by a scalar SAM tag such as read group (`RG`), cell

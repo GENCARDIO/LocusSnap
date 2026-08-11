@@ -1,0 +1,11 @@
+chr22	Ensembl_GRCh37	gene	42522501	42526908	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6";
+chr22	Ensembl_GRCh37	transcript	42522501	42526908	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical";
+chr22	Ensembl_GRCh37	exon	42526614	42526908	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical"; exon_number "1";
+chr22	Ensembl_GRCh37	exon	42525740	42525911	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical"; exon_number "2";
+chr22	Ensembl_GRCh37	exon	42525035	42525187	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical"; exon_number "3";
+chr22	Ensembl_GRCh37	exon	42524786	42524946	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical"; exon_number "4";
+chr22	Ensembl_GRCh37	exon	42524176	42524352	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical"; exon_number "5";
+chr22	Ensembl_GRCh37	exon	42523844	42523985	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical"; exon_number "6";
+chr22	Ensembl_GRCh37	exon	42523449	42523636	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical"; exon_number "7";
+chr22	Ensembl_GRCh37	exon	42522853	42522994	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical"; exon_number "8";
+chr22	Ensembl_GRCh37	exon	42522501	42522754	.	-	.	gene_id "CYP2D6"; gene_name "CYP2D6"; transcript_id "ENST00000360608.5"; transcript_name "CYP2D6-201"; tag "canonical"; exon_number "9";

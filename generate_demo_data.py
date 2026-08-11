@@ -3,8 +3,12 @@
 from dataclasses import dataclass
 from array import array
 from math import exp, log2
+import os
 from pathlib import Path
 from random import Random
+import shutil
+import subprocess
+import tempfile
 
 import pysam
 
@@ -22,6 +26,7 @@ REFERENCE_PATH = REFERENCE_DIR / "demo_reference.fa"
 CNV_REFERENCE_PATH = REFERENCE_DIR / "demo_cnv_reference.fa"
 LONG_REFERENCE_PATH = REFERENCE_DIR / "demo_long_reference.fa"
 RNA_REFERENCE_PATH = REFERENCE_DIR / "demo_rna_fusion_reference.fa.gz"
+CYP2D6_REFERENCE_PATH = REFERENCE_DIR / "demo_cyp2d6_reference.fa.gz"
 
 CNV_CHROM = "chrCNV"
 CNV_LENGTH = 80_000
@@ -36,6 +41,7 @@ RNA_CHROMS = ("chr2",)
 # BAM headers retain the GRCh37 chromosome-2 length so the ideogram is honest.
 RNA_LENGTH = 42_530_000
 GRCH37_CHR2_LENGTH = 243_199_373
+GRCH37_CHR22_LENGTH = 51_304_566
 EML4_DNA_BREAKPOINT = 42_523_383
 ALK_DNA_BREAKPOINT = 29_448_041
 EML4_EXONS = {
@@ -48,6 +54,33 @@ ALK_EXONS = {
     20: (29_446_205, 29_446_396),
     19: (29_448_324, 29_448_433),
 }
+CYP2D6_REFERENCE_START = 42_521_500
+CYP2D6_REFERENCE_END = 42_527_300
+CYP2D6_PHASE_SET = 42_524_947
+CYP2D6_SIMULATION_START = 42_512_000
+CYP2D6_SIMULATION_END = 42_538_000
+CYP2D6_WGSIM_DEPTH_PER_HAPLOTYPE = 15
+CYP2D6_EXONS = {
+    1: (42_526_613, 42_526_908),
+    2: (42_525_739, 42_525_911),
+    3: (42_525_034, 42_525_187),
+    4: (42_524_785, 42_524_946),
+    5: (42_524_175, 42_524_352),
+    6: (42_523_843, 42_523_985),
+    7: (42_523_448, 42_523_636),
+    8: (42_522_852, 42_522_994),
+    9: (42_522_500, 42_522_754),
+}
+# CYP2D6*4.001 (legacy *4A) non-reference SNVs on GRCh37. Two additional
+# legacy markers, 1661G>C/rs1058164 and 4180G>C/rs1135840, match the GRCh37
+# reference and therefore correctly do not appear as VCF alternate alleles.
+CYP2D6_STAR4_VARIANTS = (
+    (42_524_947, "C", "T", "rs3892097", "core", "splice_defect"),
+    (42_525_798, "G", "C", "rs28371705", "linked", "suballele_marker"),
+    (42_525_811, "T", "C", "rs28371704", "linked", "H94R"),
+    (42_525_821, "G", "T", "rs28371703", "linked", "L91M"),
+    (42_526_694, "G", "A", "rs1065852", "linked", "P34S"),
+)
 
 
 @dataclass(frozen=True)
@@ -418,6 +451,381 @@ def write_rna_fusion_gtf(path: Path) -> None:
                     f"chr2\tdemo\texon\t{start + 1}\t{end}\t.\t{strand}\t.\t"
                     f"{exon_attributes}\n"
                 )
+
+
+def find_hg19_reference() -> Path | None:
+    """Locate an indexed hg19 FASTA, preferring an explicit environment path."""
+    candidates = []
+    configured = os.environ.get("LOCUSSNAP_HG19_FASTA")
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.extend((
+        Path.home() / "REF" / "ucsc.hg19.fasta",
+        Path.home() / "REF_DIR" / "hg19" / "ucsc.hg19.fasta",
+    ))
+    for candidate in candidates:
+        if candidate.is_file() and Path(f"{candidate}.fai").is_file():
+            return candidate.resolve()
+    return None
+
+
+def write_cyp2d6_reference(
+    path: Path, hg19_reference: Path | None = None,
+) -> str:
+    """Write a compact indexed chr22 FASTA with the true hg19 CYP2D6 locus."""
+    pattern = b"TGCACAGTACGATCGGCTAACGTG"
+    sequence_length = CYP2D6_REFERENCE_END
+    sequence = bytearray(
+        (pattern * (sequence_length // len(pattern) + 1))[:sequence_length]
+    )
+    local_length = CYP2D6_REFERENCE_END - CYP2D6_REFERENCE_START
+    if hg19_reference is not None:
+        with pysam.FastaFile(str(hg19_reference)) as fasta:
+            local_sequence = fasta.fetch(
+                "chr22", CYP2D6_REFERENCE_START, CYP2D6_REFERENCE_END
+            ).upper()
+        if len(local_sequence) != local_length:
+            raise ValueError(
+                "The hg19 FASTA does not contain the complete CYP2D6 demo window."
+            )
+        sequence[CYP2D6_REFERENCE_START:CYP2D6_REFERENCE_END] = (
+            local_sequence.encode("ascii")
+        )
+    else:
+        rng = Random(20_264)
+        sequence[CYP2D6_REFERENCE_START:CYP2D6_REFERENCE_END] = bytes(
+            ord(base)
+            for base in rng.choices(
+                "ACGT", weights=(29, 21, 21, 29), k=local_length
+            )
+        )
+    for position, reference, *_ in CYP2D6_STAR4_VARIANTS:
+        observed = chr(sequence[position - 1])
+        if hg19_reference is not None and observed != reference:
+            raise ValueError(
+                f"Unexpected hg19 reference at chr22:{position}: "
+                f"expected {reference}, observed {observed}."
+            )
+        sequence[position - 1] = ord(reference)
+
+    with pysam.BGZFile(str(path), "w") as handle:
+        handle.write(b">chr22\n")
+        block_size = 800_000
+        for block_start in range(0, len(sequence), block_size):
+            block_end = min(block_start + block_size, len(sequence))
+            wrapped = b"\n".join(
+                bytes(sequence[offset:min(offset + 80, block_end)])
+                for offset in range(block_start, block_end, 80)
+            )
+            handle.write(wrapped + b"\n")
+    for suffix in (".fai", ".gzi"):
+        index_path = Path(f"{path}{suffix}")
+        if index_path.exists():
+            index_path.unlink()
+    pysam.faidx(str(path))
+    return sequence[CYP2D6_REFERENCE_START:CYP2D6_REFERENCE_END].decode("ascii")
+
+
+def write_cyp2d6_gtf(path: Path) -> None:
+    """Write the canonical GRCh37 CYP2D6 transcript with numbered exons."""
+    gene_start = min(start for start, _ in CYP2D6_EXONS.values())
+    gene_end = max(end for _, end in CYP2D6_EXONS.values())
+    attributes = 'gene_id "CYP2D6"; gene_name "CYP2D6";'
+    transcript_attributes = (
+        attributes + ' transcript_id "ENST00000360608.5"; '
+        'transcript_name "CYP2D6-201"; tag "canonical";'
+    )
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(
+            f"chr22\tEnsembl_GRCh37\tgene\t{gene_start + 1}\t{gene_end}\t.\t-\t.\t"
+            f"{attributes}\n"
+        )
+        handle.write(
+            f"chr22\tEnsembl_GRCh37\ttranscript\t{gene_start + 1}\t{gene_end}\t.\t-\t.\t"
+            f"{transcript_attributes}\n"
+        )
+        for exon_number, (start, end) in CYP2D6_EXONS.items():
+            handle.write(
+                f"chr22\tEnsembl_GRCh37\texon\t{start + 1}\t{end}\t.\t-\t.\t"
+                f'{transcript_attributes} exon_number "{exon_number}";\n'
+            )
+
+
+def write_cyp2d6_bam(path: Path, local_reference: str) -> None:
+    """Write the dependency-free fallback CYP2D6*4.001/*1 BAM."""
+    header = pysam.AlignmentHeader.from_dict({
+        "HD": {"VN": "1.6", "SO": "coordinate"},
+        "SQ": [{"SN": "chr22", "LN": GRCH37_CHR22_LENGTH}],
+        "RG": [{
+            "ID": "PGX", "SM": "CYP2D6_star4_star1", "PL": "ILLUMINA",
+            "LB": "CYP2D6_targeted_panel",
+        }],
+    })
+    rng = Random(20_265)
+    reads = []
+    read_length = 150
+    insert_size = 330
+
+    def read_sequence(start: int, haplotype: int):
+        local_start = start - CYP2D6_REFERENCE_START
+        sequence = list(local_reference[local_start:local_start + read_length])
+        qualities = [38] * len(sequence)
+        if haplotype == 1:
+            for position, _reference, alternate, *_ in CYP2D6_STAR4_VARIANTS:
+                query_position = position - 1 - start
+                if 0 <= query_position < len(sequence):
+                    sequence[query_position] = alternate
+        add_sequencing_errors(sequence, qualities, rng, 0.0007)
+        return "".join(sequence), qualities
+
+    fragment_index = 0
+    for base_start in range(42_522_020, 42_526_591, 32):
+        for haplotype in (1, 2):
+            fragment_index += 1
+            jitter = rng.randint(-5, 5)
+            left_start = base_start + jitter
+            right_start = left_start + insert_size - read_length
+            pair_name = f"CYP2D6_HP{haplotype}_{fragment_index:04d}"
+            left_sequence, left_qualities = read_sequence(left_start, haplotype)
+            right_sequence, right_qualities = read_sequence(right_start, haplotype)
+
+            left = pysam.AlignedSegment(header)
+            left.query_name = pair_name
+            left.query_sequence = left_sequence
+            left.flag = 1 | 2 | 64 | 32
+            left.reference_id = 0
+            left.reference_start = left_start
+            left.mapping_quality = max(48, min(60, round(rng.gauss(58, 2))))
+            left.cigar = [(0, read_length)]
+            left.next_reference_id = 0
+            left.next_reference_start = right_start
+            left.template_length = insert_size
+            left.query_qualities = left_qualities
+
+            right = pysam.AlignedSegment(header)
+            right.query_name = pair_name
+            right.query_sequence = right_sequence
+            right.flag = 1 | 2 | 128 | 16
+            right.reference_id = 0
+            right.reference_start = right_start
+            right.mapping_quality = max(48, min(60, round(rng.gauss(58, 2))))
+            right.cigar = [(0, read_length)]
+            right.next_reference_id = 0
+            right.next_reference_start = left_start
+            right.template_length = -insert_size
+            right.query_qualities = right_qualities
+
+            for read in (left, right):
+                read.set_tag("RG", "PGX")
+                read.set_tag("HP", haplotype)
+                read.set_tag("PS", CYP2D6_PHASE_SET)
+                reads.append(read)
+
+    reads.sort(key=lambda read: (read.reference_start, read.query_name, read.flag))
+    with pysam.AlignmentFile(str(path), "wb", header=header) as bam:
+        for read in reads:
+            bam.write(read)
+    index_path = Path(f"{path}.bai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.index(str(path))
+
+
+def write_cyp2d6_wgsim_bam(
+    path: Path, hg19_reference: Path, threads: int = 2,
+) -> None:
+    """Generate phased fragments with wgsim and map them to hg19 with BWA-MEM."""
+    for executable in ("wgsim", "bwa"):
+        if shutil.which(executable) is None:
+            raise RuntimeError(
+                f"{executable} is required for the reference-mapped CYP2D6 demo."
+            )
+    bwa_extensions = (".amb", ".ann", ".bwt", ".pac", ".sa")
+    missing_indexes = [
+        f"{hg19_reference}{extension}"
+        for extension in bwa_extensions
+        if not Path(f"{hg19_reference}{extension}").is_file()
+    ]
+    if missing_indexes:
+        raise RuntimeError(
+            "The hg19 FASTA needs a BWA index; missing: "
+            + ", ".join(missing_indexes)
+        )
+
+    with pysam.FastaFile(str(hg19_reference)) as fasta:
+        source_sequence = fasta.fetch(
+            "chr22", CYP2D6_SIMULATION_START, CYP2D6_SIMULATION_END
+        ).upper()
+    expected_length = CYP2D6_SIMULATION_END - CYP2D6_SIMULATION_START
+    if len(source_sequence) != expected_length:
+        raise ValueError("The hg19 FASTA does not contain the CYP2D6 simulation window.")
+
+    pair_count = round(
+        expected_length * CYP2D6_WGSIM_DEPTH_PER_HAPLOTYPE / (2 * 150)
+    )
+    with tempfile.TemporaryDirectory(prefix="locus_snap_cyp2d6_") as temporary:
+        temporary_dir = Path(temporary)
+        combined_fastq_paths = (
+            temporary_dir / "cyp2d6_R1.fastq",
+            temporary_dir / "cyp2d6_R2.fastq",
+        )
+        haplotype_fastqs = []
+        for haplotype in (1, 2):
+            haplotype_sequence = list(source_sequence)
+            if haplotype == 1:
+                for position, _reference, alternate, *_ in CYP2D6_STAR4_VARIANTS:
+                    local_position = position - 1 - CYP2D6_SIMULATION_START
+                    haplotype_sequence[local_position] = alternate
+            haplotype_fasta = temporary_dir / f"HP{haplotype}.fa"
+            with haplotype_fasta.open("w", encoding="ascii") as handle:
+                handle.write(f">HP{haplotype}\n")
+                joined_sequence = "".join(haplotype_sequence)
+                for offset in range(0, len(joined_sequence), 80):
+                    handle.write(joined_sequence[offset:offset + 80] + "\n")
+            read1 = temporary_dir / f"HP{haplotype}_R1.fastq"
+            read2 = temporary_dir / f"HP{haplotype}_R2.fastq"
+            subprocess.run(
+                [
+                    "wgsim", "-N", str(pair_count), "-1", "150", "-2", "150",
+                    "-d", "350", "-s", "35", "-e", "0.001", "-r", "0",
+                    "-R", "0", "-X", "0", "-S", str(26_000 + haplotype),
+                    str(haplotype_fasta), str(read1), str(read2),
+                ],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            haplotype_fastqs.append((read1, read2))
+
+        for read_index, combined_path in enumerate(combined_fastq_paths):
+            with combined_path.open("wb") as combined_handle:
+                for pair_paths in haplotype_fastqs:
+                    with pair_paths[read_index].open("rb") as haplotype_handle:
+                        shutil.copyfileobj(haplotype_handle, combined_handle)
+
+        sam_path = temporary_dir / "cyp2d6.sam"
+        read_group = (
+            "@RG\\tID:PGX\\tSM:CYP2D6_star4_star1\\tPL:ILLUMINA"
+            "\\tLB:WGS_simulation"
+        )
+        with sam_path.open("wb") as sam_handle:
+            subprocess.run(
+                [
+                    "bwa", "mem", "-t", str(max(1, threads)), "-a", "-M",
+                    "-R", read_group, str(hg19_reference),
+                    str(combined_fastq_paths[0]), str(combined_fastq_paths[1]),
+                ],
+                check=True, stdout=sam_handle, stderr=subprocess.DEVNULL,
+            )
+
+        unsorted_bam = temporary_dir / "cyp2d6.tagged.bam"
+        with pysam.AlignmentFile(str(sam_path), "r") as alignments:
+            header_dict = alignments.header.to_dict()
+            for program in header_dict.get("PG", []):
+                if program.get("ID") == "bwa":
+                    program["CL"] = (
+                        "bwa mem -a -M <hg19> CYP2D6_wgsim_R1.fastq "
+                        "CYP2D6_wgsim_R2.fastq"
+                    )
+            tagged_header = pysam.AlignmentHeader.from_dict(header_dict)
+            with pysam.AlignmentFile(
+                str(unsorted_bam), "wb", header=tagged_header
+            ) as tagged_bam:
+                for read in alignments:
+                    if read.query_name.startswith("HP1_"):
+                        haplotype = 1
+                    elif read.query_name.startswith("HP2_"):
+                        haplotype = 2
+                    else:
+                        raise ValueError(
+                            f"Cannot recover haplotype from wgsim read {read.query_name!r}."
+                        )
+                    read.set_tag("HP", haplotype)
+                    read.set_tag("PS", CYP2D6_PHASE_SET)
+                    tagged_bam.write(read)
+
+        pysam.sort(
+            "--no-PG", "-@", str(max(1, threads)),
+            "-o", str(path), str(unsorted_bam)
+        )
+    index_path = Path(f"{path}.bai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.index(str(path))
+
+
+def cyp2d6_allelic_depths(bam_path: Path | None) -> dict[int, tuple[int, int]]:
+    """Count primary high-quality reference and alternate bases per demo site."""
+    if bam_path is None or not bam_path.is_file():
+        return {}
+    variant_lookup = {
+        position - 1: (reference, alternate)
+        for position, reference, alternate, *_ in CYP2D6_STAR4_VARIANTS
+    }
+    counts = {position: [0, 0] for position in variant_lookup}
+    with pysam.AlignmentFile(str(bam_path), "rb") as bam:
+        for position in sorted(variant_lookup):
+            reference, alternate = variant_lookup[position]
+            for column in bam.pileup(
+                "chr22", position, position + 1, truncate=True,
+                min_base_quality=20, min_mapping_quality=0,
+            ):
+                if column.reference_pos != position:
+                    continue
+                for pileup_read in column.pileups:
+                    read = pileup_read.alignment
+                    query_position = pileup_read.query_position
+                    if (
+                        query_position is None or pileup_read.is_del
+                        or pileup_read.is_refskip or read.is_secondary
+                        or read.is_supplementary or read.is_duplicate
+                    ):
+                        continue
+                    base = read.query_sequence[query_position].upper()
+                    if base == reference:
+                        counts[position][0] += 1
+                    elif base == alternate:
+                        counts[position][1] += 1
+    return {
+        position + 1: (depths[0], depths[1])
+        for position, depths in counts.items()
+    }
+
+
+def write_cyp2d6_vcf(path: Path, bam_path: Path | None = None) -> None:
+    """Write a phased CYP2D6*4.001/*1 VCF with star-allele metadata."""
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write("##fileformat=VCFv4.2\n")
+        handle.write(f"##contig=<ID=chr22,length={GRCH37_CHR22_LENGTH}>\n")
+        handle.write(
+            '##INFO=<ID=STAR,Number=1,Type=String,Description="PharmVar star allele">\n'
+        )
+        handle.write(
+            '##INFO=<ID=ROLE,Number=1,Type=String,Description="Core or linked suballele variant">\n'
+        )
+        handle.write(
+            '##INFO=<ID=EFFECT,Number=1,Type=String,Description="Variant consequence">\n'
+        )
+        handle.write(
+            '##INFO=<ID=SOURCE,Number=1,Type=String,Description="Star-allele source record">\n'
+        )
+        handle.write('##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n')
+        handle.write('##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths">\n')
+        handle.write('##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read depth">\n')
+        handle.write('##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set">\n')
+        handle.write(
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tPGX_DEMO\n"
+        )
+        allelic_depths = cyp2d6_allelic_depths(bam_path)
+        for position, reference, alternate, rsid, role, effect in sorted(
+            CYP2D6_STAR4_VARIANTS
+        ):
+            ref_depth, alt_depth = allelic_depths.get(position, (15, 15))
+            total_depth = ref_depth + alt_depth
+            handle.write(
+                f"chr22\t{position}\t{rsid}\t{reference}\t{alternate}\t100\tPASS\t"
+                f"STAR=CYP2D6*4.001;ROLE={role};EFFECT={effect};SOURCE=PharmVar_PV02557\t"
+                f"GT:AD:DP:PS\t1|0:{ref_depth},{alt_depth}:{total_depth}:"
+                f"{CYP2D6_PHASE_SET}\n"
+            )
 
 
 def write_rna_fusion_bam(path: Path, references: dict[str, str]) -> None:
@@ -1504,6 +1912,24 @@ def main() -> None:
     write_eml4_alk_dna_bam(
         ALIGNMENTS_DIR / "demo_eml4_alk_dna.bam", rna_references
     )
+    del rna_references
+    hg19_reference = find_hg19_reference()
+    cyp2d6_reference = write_cyp2d6_reference(
+        CYP2D6_REFERENCE_PATH, hg19_reference
+    )
+    write_cyp2d6_gtf(ANNOTATIONS_DIR / "demo_cyp2d6.gtf")
+    cyp2d6_bam_path = ALIGNMENTS_DIR / "demo_cyp2d6_star4.bam"
+    if hg19_reference is not None and all(
+        shutil.which(executable) for executable in ("wgsim", "bwa")
+    ):
+        write_cyp2d6_wgsim_bam(cyp2d6_bam_path, hg19_reference)
+        cyp2d6_mode = f"wgsim + BWA-MEM against {hg19_reference}"
+    else:
+        write_cyp2d6_bam(cyp2d6_bam_path, cyp2d6_reference)
+        cyp2d6_mode = "dependency-free fallback"
+    write_cyp2d6_vcf(
+        VARIANTS_DIR / "demo_cyp2d6_star4.vcf", cyp2d6_bam_path
+    )
     write_long_read_bam(
         ALIGNMENTS_DIR / "demo_long_reads.bam", long_reference
     )
@@ -1581,13 +2007,15 @@ def main() -> None:
     refresh_tabix(VARIANTS_DIR / "demo_baf.vcf", "vcf")
     refresh_tabix(VARIANTS_DIR / "demo_met_ex14.vcf", "vcf")
     refresh_tabix(VARIANTS_DIR / "demo_structural_variants.vcf", "vcf")
+    refresh_tabix(VARIANTS_DIR / "demo_cyp2d6_star4.vcf", "vcf")
     refresh_tabix(ANNOTATIONS_DIR / "demo_dnase.narrowPeak", "bed")
     refresh_tabix(SIGNALS_DIR / "demo_ctcf_control.signal", "bed")
     refresh_tabix(SIGNALS_DIR / "demo_ctcf_knockdown.signal", "bed")
     refresh_tabix(SIGNALS_DIR / "demo_ctcf_mel.signal", "bed")
     print(
         "Regenerated demo inputs in out/demo_data/ "
-        f"({cnv_read_count:,} CNV reads; {len(cnv_sites)} BAF loci)."
+        f"({cnv_read_count:,} CNV reads; {len(cnv_sites)} BAF loci; "
+        f"CYP2D6: {cyp2d6_mode})."
     )
 
 

@@ -8,10 +8,16 @@ from generate_demo_data import (
     CNV_LENGTH,
     CNV_SEGMENTS,
     CNV_TUMOUR_PURITY,
+    CYP2D6_PHASE_SET,
+    CYP2D6_REFERENCE_END,
+    CYP2D6_REFERENCE_START,
+    CYP2D6_STAR4_VARIANTS,
     EML4_DNA_BREAKPOINT,
     add_sequencing_errors,
     build_cnv_variant_sites,
     write_eml4_alk_dna_bam,
+    write_cyp2d6_bam,
+    write_cyp2d6_vcf,
     write_rna_fusion_bam,
     write_rna_fusion_reference,
 )
@@ -91,3 +97,29 @@ def test_eml4_alk_demo_contains_rna_fusion_and_dna_inversion_evidence(tmp_path):
     }
     assert {"FF", "RR"} <= orientations
     assert EML4_DNA_BREAKPOINT - ALK_DNA_BREAKPOINT == 13_075_342
+
+
+def test_cyp2d6_demo_links_phased_reads_to_star4_vcf(tmp_path):
+    bam_path = tmp_path / "cyp2d6.bam"
+    vcf_path = tmp_path / "cyp2d6.vcf"
+    reference = ["A"] * (CYP2D6_REFERENCE_END - CYP2D6_REFERENCE_START)
+    for position, ref, *_ in CYP2D6_STAR4_VARIANTS:
+        reference[position - 1 - CYP2D6_REFERENCE_START] = ref
+
+    write_cyp2d6_bam(bam_path, "".join(reference))
+    write_cyp2d6_vcf(vcf_path, bam_path)
+
+    with pysam.AlignmentFile(str(bam_path), "rb") as bam:
+        reads = list(bam.fetch("chr22"))
+    assert reads
+    assert {read.get_tag("HP") for read in reads} == {1, 2}
+    assert {read.get_tag("PS") for read in reads} == {CYP2D6_PHASE_SET}
+
+    with pysam.VariantFile(str(vcf_path)) as vcf:
+        records = list(vcf)
+    assert len(records) == len(CYP2D6_STAR4_VARIANTS) == 5
+    assert all(record.samples["PGX_DEMO"]["GT"] == (1, 0) for record in records)
+    assert all(record.samples["PGX_DEMO"].phased for record in records)
+    assert all(record.samples["PGX_DEMO"]["DP"] > 0 for record in records)
+    assert all(min(record.samples["PGX_DEMO"]["AD"]) > 0 for record in records)
+    assert sum(record.info["ROLE"] == "core" for record in records) == 1

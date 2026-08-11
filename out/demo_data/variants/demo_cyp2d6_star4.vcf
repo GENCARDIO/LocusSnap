@@ -1,0 +1,16 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr22,length=51304566>
+##INFO=<ID=STAR,Number=1,Type=String,Description="PharmVar star allele">
+##INFO=<ID=ROLE,Number=1,Type=String,Description="Core or linked suballele variant">
+##INFO=<ID=EFFECT,Number=1,Type=String,Description="Variant consequence">
+##INFO=<ID=SOURCE,Number=1,Type=String,Description="Star-allele source record">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read depth">
+##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	PGX_DEMO
+chr22	42524947	rs3892097	C	T	100	PASS	STAR=CYP2D6*4.001;ROLE=core;EFFECT=splice_defect;SOURCE=PharmVar_PV02557	GT:AD:DP:PS	1|0:21,16:37:42524947
+chr22	42525798	rs28371705	G	C	100	PASS	STAR=CYP2D6*4.001;ROLE=linked;EFFECT=suballele_marker;SOURCE=PharmVar_PV02557	GT:AD:DP:PS	1|0:11,15:26:42524947
+chr22	42525811	rs28371704	T	C	100	PASS	STAR=CYP2D6*4.001;ROLE=linked;EFFECT=H94R;SOURCE=PharmVar_PV02557	GT:AD:DP:PS	1|0:10,14:24:42524947
+chr22	42525821	rs28371703	G	T	100	PASS	STAR=CYP2D6*4.001;ROLE=linked;EFFECT=L91M;SOURCE=PharmVar_PV02557	GT:AD:DP:PS	1|0:8,15:23:42524947
+chr22	42526694	rs1065852	G	A	100	PASS	STAR=CYP2D6*4.001;ROLE=linked;EFFECT=P34S;SOURCE=PharmVar_PV02557	GT:AD:DP:PS	1|0:9,14:23:42524947

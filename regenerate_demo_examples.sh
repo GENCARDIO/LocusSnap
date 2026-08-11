@@ -220,6 +220,31 @@ python3 -m locus_snap \
   --dpi 150
 
 python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_cyp2d6_star4.bam \
+  --sample_label 'CYP2D6*4.001 / *1 · wgsim 30× · BWA-MEM hg19' \
+  --fasta out/demo_data/reference/demo_cyp2d6_reference.fa.gz \
+  --region chr22:42522001-42527200 \
+  --custom_track 'out/demo_data/annotations/demo_cyp2d6.gtf,gtf,CYP2D6 canonical transcript,#17217a,collapse,0.72' \
+  --custom_track 'out/demo_data/variants/demo_cyp2d6_star4.vcf.gz,vcf,Phased VCF · HP1 *4.001 (no function) / HP2 *1,#7a1f5c,expand,1.18' \
+  --haplotype_view split \
+  --haplotype_filter 1 2 \
+  --view_as_pairs \
+  --show_exon_numbers \
+  --coverage_vaf_threshold 0.20 \
+  --display_mode squish \
+  --layout pack \
+  --min_mapq 0 \
+  --max_alignment_depth 60 \
+  --max_rows 42 \
+  --genome hg19 \
+  --refseq none \
+  --title_align left \
+  --output_dir out \
+  --output_name 42_cyp2d6_star4_haplotype \
+  --fig_width 15 \
+  --dpi 160
+
+python3 -m locus_snap \
   --bam out/demo_data/alignments/demo_tumour.bam \
   --bam out/demo_data/alignments/demo_normal.bam \
   --bam out/demo_data/alignments/demo_relapse.bam \
@@ -451,5 +476,8 @@ if command -v google-chrome >/dev/null 2>&1; then
 else
   printf '%s\n' 'Skipped report preview: google-chrome is not installed.'
 fi
+
+cp out/42_cyp2d6_star4_haplotype.png \
+  docs/assets/images/cyp2d6-star4-haplotype.png
 
 printf '%s\n' 'Regenerated the curated README figures and multi-sample batch report in out/'
