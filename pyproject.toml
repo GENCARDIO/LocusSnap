@@ -9,7 +9,7 @@ description = "Render IGV-like genomic snapshots from an indexed BAM without ope
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [{ name = "bdolmo" }]
 keywords = ["bioinformatics", "genomics", "bam", "igv", "sequencing", "visualization"]
 classifiers = [

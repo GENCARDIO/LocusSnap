@@ -1103,7 +1103,7 @@ locus-snap --help
 
 ## Test supported Python versions with Tox
 
-Install the development tools and run the complete Python 3.9–3.14 matrix:
+Install the development tools and run the complete Python 3.10–3.14 matrix:
 
 ```bash
 python3 -m pip install -e '.[dev]'
@@ -1194,7 +1194,7 @@ pytest -q
 
 A GitHub Actions workflow ([.github/workflows/ci.yml](.github/workflows/ci.yml))
 runs the complete suite on every push and pull request against Python
-3.9–3.14, mirroring the [Tox](#test-supported-python-versions-with-tox)
+3.10–3.14, mirroring the [Tox](#test-supported-python-versions-with-tox)
 matrix above.
 
 ## Releasing to PyPI

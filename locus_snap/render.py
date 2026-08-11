@@ -1817,9 +1817,9 @@ class AlignmentRenderer:
                         if visible_width_px < max(8, len(exon_label) * 4.5):
                             continue
                         ax.text(
-                            (lo + hi) / 2, center, exon_label,
-                            ha="center", va="center", fontsize=5.0,
-                            color=self.visual_colors["contrast_edge"],
+                            (lo + hi) / 2, center - 0.28, exon_label,
+                            ha="center", va="bottom", fontsize=5.0,
+                            color=feature_color,
                             fontweight="bold", clip_on=True, zorder=5,
                         )
 

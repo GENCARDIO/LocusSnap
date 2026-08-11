@@ -1249,7 +1249,11 @@ def test_gene_track_option_draws_available_exon_numbers():
 
     renderer.draw_annotation_track(ax, track, 90, 220)
 
-    assert {text.get_text() for text in ax.texts} >= {"12", "13"}
+    exon_number_texts = [text for text in ax.texts if text.get_text() in {"12", "13"}]
+    assert {text.get_text() for text in exon_number_texts} == {"12", "13"}
+    assert all(text.get_position()[1] < 0.41 for text in exon_number_texts)
+    assert all(text.get_verticalalignment() == "bottom" for text in exon_number_texts)
+    assert all(to_hex(text.get_color()) == "#17217a" for text in exon_number_texts)
     plt.close(fig)
 
 

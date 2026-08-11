@@ -477,7 +477,31 @@ else
   printf '%s\n' 'Skipped report preview: google-chrome is not installed.'
 fi
 
+cp out/32_close_zoom_softclipped_bases.png \
+  docs/assets/images/close-zoom-softclipped-bases.png
+cp out/33_close_zoom_insertions.png \
+  docs/assets/images/close-zoom-insertions.png
+cp out/38_custom_track_plugin.png \
+  docs/assets/images/custom-track-plugin.png
 cp out/42_cyp2d6_star4_haplotype.png \
   docs/assets/images/cyp2d6-star4-haplotype.png
+cp out/30_default_refseq_isoforms.png \
+  docs/assets/images/default-refseq-isoforms.png
+cp out/37_long_read_modifications.png \
+  docs/assets/images/long-read-modifications.png
+cp out/40_molecule_consensus.png \
+  docs/assets/images/molecule-consensus.png
+cp out/27_multi_bam_vcf_companions.png \
+  docs/assets/images/multi-bam-vcf-companions.png
+cp out/41_rnaseq_junction_fusion.png \
+  docs/assets/images/rna-junction-fusion.png
+cp out/24_rnaseq_sashimi.png \
+  docs/assets/images/rnaseq-sashimi.png
+cp out/31_structural_variant_evidence.png \
+  docs/assets/images/structural-variant-evidence.png
+cp out/36_tag_grouped_reads.png \
+  docs/assets/images/tag-grouped-reads.png
+cp out/18_variant_evidence_baf_loh.png \
+  docs/assets/images/variant-evidence-baf-loh.png
 
 printf '%s\n' 'Regenerated the curated README figures and multi-sample batch report in out/'
