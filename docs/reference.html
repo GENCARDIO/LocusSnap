@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="LocusSnap CLI, input format, output, Python API, plugin API, and compatibility reference."><meta name="theme-color" content="#12202d"><link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="assets/site.css"><title>Reference — LocusSnap documentation</title><script>document.documentElement.dataset.theme = localStorage.getItem("locus-theme") || "light";</script></head>
+  <body class="docs-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header" data-header><div class="nav-shell"><a class="brand" href="index.html"><img src="assets/favicon.svg" alt="" width="36" height="36"><span>LocusSnap</span></a><button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false" data-menu-toggle><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><nav class="site-nav" aria-label="Main navigation" data-menu><a href="getting-started.html">Start</a><a href="workflows.html">Workflows</a><a href="recipes.html">Recipes</a><a href="reference.html" aria-current="page">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><div class="nav-actions"><button class="icon-button theme-toggle" type="button" aria-label="Use dark theme" data-theme-toggle><svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg><svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg></button><a class="button button-small button-ghost" href="https://github.com/GENCARDIO/LocusSnap">GitHub</a></div></div></header>
+    <main id="main">
+      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Technical reference</p><h1>Reference</h1><p>A navigable map of command groups, supported formats, programmatic interfaces, and output behavior.</p></div></section>
+      <div class="docs-layout">
+        <aside class="docs-sidebar"><p class="docs-sidebar-label">Documentation</p><nav><a href="getting-started.html">Getting started</a><a href="workflows.html">Workflow guides</a><a href="recipes.html">Recipes</a><a href="configuration.html">Configuration</a><a href="reference.html" aria-current="page">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><p class="docs-sidebar-label">Reference</p><nav><a href="#cli">CLI</a><a href="#regions">Regions &amp; samples</a><a href="#reads">Read display</a><a href="#rna">RNA</a><a href="#tracks">Tracks</a><a href="#outputs">Outputs</a><a href="#python">Python API</a></nav></aside>
+        <article class="docs-content">
+          <p class="docs-lede">Run <code>locus-snap --help</code> in the installed environment for the exact option set and defaults of that release. This page groups the public interface by purpose.</p>
+
+          <h2 id="cli">Command-line interface</h2>
+          <pre><code>locus-snap --bam BAM (--region REGION | --batch_regions FILE) [OPTIONS]</code></pre>
+          <div class="option-group">
+            <div class="option-row"><code>--bam PATH</code><span>Indexed BAM or CRAM; repeat for stacked sample panels.</span></div>
+            <div class="option-row"><code>--region LOCUS</code><span>1-based inclusive <code>chrom:start-end</code>; repeat for explicit multi-locus columns.</span></div>
+            <div class="option-row"><code>--batch_regions FILE</code><span>BED3/BED4 or VCF/BCF candidates rendered in one run.</span></div>
+            <div class="option-row"><code>--fasta PATH</code><span>Reference bases, mismatch detection, splice motifs, and CRAM decoding.</span></div>
+            <div class="option-row"><code>--config PATH</code><span>Validated reusable YAML preferences and styles.</span></div>
+          </div>
+
+          <h2 id="regions">Regions, samples, and reports</h2>
+          <div class="option-group">
+            <div class="option-row"><code>--flank BP</code><span>Add context to each requested region.</span></div>
+            <div class="option-row"><code>--region_label LABEL</code><span>Name the corresponding repeated region.</span></div>
+            <div class="option-row"><code>--link_breakpoints</code><span>Connect centres of adjacent multi-locus panels.</span></div>
+            <div class="option-row"><code>--sample_label LABEL</code><span>Name the corresponding repeated BAM.</span></div>
+            <div class="option-row"><code>--vcf_companion VCF</code><span>Attach one VCF per BAM; use <code>none</code> as a placeholder.</span></div>
+            <div class="option-row"><code>--report [PATH]</code><span>Build a self-contained HTML batch report.</span></div>
+            <div class="option-row"><code>--threads N</code><span>Use isolated worker processes for batch regions.</span></div>
+          </div>
+
+          <h2 id="reads">Alignment selection and display</h2>
+          <table><thead><tr><th>Purpose</th><th>Options</th></tr></thead><tbody>
+            <tr><td>Filter</td><td><code>--min_mapq</code>, <code>--include_secondary</code>, <code>--exclude_supplementary</code>, <code>--include_duplicates</code>, <code>--only</code></td></tr>
+            <tr><td>Arrange</td><td><code>--layout</code>, <code>--display_mode</code>, <code>--sort_by</code>, <code>--sort_base_position</code>, <code>--sort_order</code></td></tr>
+            <tr><td>Depth</td><td><code>--max_rows</code>, <code>--max_alignment_depth</code></td></tr>
+            <tr><td>Pairs</td><td><code>--view_as_pairs</code>, <code>--mate_view</code>, <code>--mate_window_source</code>, <code>--insert_size_sigma</code>, <code>--no_pair_colors</code></td></tr>
+            <tr><td>Tags</td><td><code>--group_by_tag</code>, <code>--color_by_tag</code>, <code>--tag_filter</code>, <code>--tag_color</code></td></tr>
+            <tr><td>Phasing</td><td><code>--haplotype_view</code>, <code>--haplotype_filter</code>, <code>--haplotype_tag</code>, <code>--phase_set_tag</code></td></tr>
+            <tr><td>Molecules</td><td><code>--molecule_mode</code>, <code>--molecule_tag</code>, <code>--min_family_size</code>, <code>--molecule_consensus_fraction</code></td></tr>
+            <tr><td>Long reads</td><td><code>--long_read_mode</code>, <code>--base_modifications</code>, <code>--modification_code</code>, <code>--min_mod_probability</code></td></tr>
+          </tbody></table>
+
+          <h2 id="rna">RNA-seq evidence</h2>
+          <div class="option-group">
+            <div class="option-row"><code>--sashimi</code><span>Count-labelled CIGAR-N splice-junction arcs.</span></div>
+            <div class="option-row"><code>--rna_mode</code><span>Classified junctions plus clustered fusion evidence.</span></div>
+            <div class="option-row"><code>--min_junction_reads N</code><span>Minimum unique supporting read names.</span></div>
+            <div class="option-row"><code>--min_junction_anchor BP</code><span>Matched bases required on both junction sides.</span></div>
+            <div class="option-row"><code>--sashimi_strand MODE</code><span><code>combined</code> or mirrored <code>split</code> arcs.</span></div>
+            <div class="option-row"><code>--rna_strandness MODE</code><span><code>alignment</code>, <code>forward</code>, <code>reverse</code>, or <code>unstranded</code>.</span></div>
+            <div class="option-row"><code>--junction_labels MODE</code><span><code>count</code>, <code>status</code>, or <code>full</code> motif labels.</span></div>
+            <div class="option-row"><code>--rna_fusions</code><span>Fusion candidates without junction arcs.</span></div>
+            <div class="option-row"><code>--rna_evidence_tsv PATH</code><span>One-row junction/fusion summaries for a single BAM and locus.</span></div>
+          </div>
+
+          <h2 id="tracks">Supported tracks</h2>
+          <table><thead><tr><th>Data</th><th>Recognized formats</th><th>Notes</th></tr></thead><tbody>
+            <tr><td>Gene models</td><td>BED/BED12, GFF, GFF3, GTF</td><td>Transcript grouping, coding/UTR blocks, strand arrows, primary isoforms.</td></tr>
+            <tr><td>Variants</td><td>VCF, VCF.GZ, BCF</td><td>SNVs, indels, symbolic alleles, and BND partners.</td></tr>
+            <tr><td>Peaks</td><td>narrowPeak, broadPeak, peak</td><td>Interval or density display.</td></tr>
+            <tr><td>Signal</td><td>BigWig, bedGraph, signal</td><td>Self-indexed BigWig; signed log2/CNV modes available.</td></tr>
+            <tr><td>Copy number</td><td>SEG, CNV, log2; genotype VCF for BAF</td><td>Copy-state segments, balanced alleles, gain and LOH.</td></tr>
+            <tr><td>Chromatin</td><td>TAD/domain BED, BEDPE</td><td>Domains, loop arcs, or triangular binned contacts.</td></tr>
+            <tr><td>External</td><td>API-v1 Python plugin</td><td>Stable canvas with LocusSnap-owned layout and export.</td></tr>
+          </tbody></table>
+
+          <h2 id="outputs">Output and analysis files</h2>
+          <div class="option-group"><div class="option-row"><code>--output_name NAME</code><span>A recognized suffix selects the format; otherwise PNG is appended.</span></div><div class="option-row"><code>--output_format FORMAT</code><span>PNG, SVG/SVGZ, PDF, JPEG, TIFF, or WebP.</span></div><div class="option-row"><code>--fig_width INCHES</code><span>Physical figure width.</span></div><div class="option-row"><code>--dpi N</code><span>Raster resolution and rasterized vector-element density.</span></div><div class="option-row"><code>--metrics_tsv PATH</code><span>Per-read classifications and computed evidence.</span></div></div>
+
+          <h2 id="python">Python API</h2>
+          <h3>Render a snapshot</h3>
+          <pre><code>from locus_snap.snapshot import BamSnapshot
+
+snapshot = BamSnapshot(
+    bam="sample.bam",
+    chrom="chr1",
+    start=100_000,       # zero-based internal coordinate
+    end=101_000,         # half-open internal coordinate
+    fasta="reference.fa",
+    output_dir="out",
+    output_name="api-locus",
+    display_mode="squish",
+)
+summary = snapshot.snap(metrics_tsv="out/read-metrics.tsv")
+print(snapshot.output_path, summary.n_reads)</code></pre>
+          <div class="callout warning"><strong>Coordinate convention changes at the API boundary.</strong><p>The CLI accepts 1-based inclusive regions. <code>BamSnapshot</code> and plugin <code>TrackRegion</code> use zero-based, half-open intervals.</p></div>
+          <h3>RNA evidence helpers</h3>
+          <pre><code>from locus_snap import collect_splice_junctions, collect_fusion_evidence
+
+junctions = collect_splice_junctions(reads, minimum_anchor=12)
+fusions = collect_fusion_evidence(reads, "chr1", minimum_mapq=20)</code></pre>
+          <h3>Plugin interface</h3>
+          <p>The public plugin surface exports <code>TrackPlugin</code>, <code>TrackCanvas</code>, <code>TrackRegion</code>, <code>PluginTrackSource</code>, discovery helpers, and API-version constants from <code>locus_snap</code>.</p>
+
+          <h2>Version and compatibility</h2>
+          <p>LocusSnap 0.3.0 supports Python 3.9–3.14. BAM/CRAM parsing is provided by pysam; plotting uses Matplotlib. The tox matrix and GitHub Actions exercise the supported Python versions.</p>
+          <nav class="page-nav"><a href="configuration.html"><small>Previous</small><strong>← Configuration</strong></a><a href="gallery.html"><small>Next</small><strong>Gallery →</strong></a></nav>
+        </article>
+      </div>
+    </main>
+    <footer class="site-footer"><div class="page-shell footer-grid"><div><a class="brand footer-brand" href="index.html"><img src="assets/favicon.svg" alt="" width="32" height="32"><span>LocusSnap</span></a><p>IGV-like genomic snapshots from the command line.</p></div><nav><a href="getting-started.html">Docs</a><a href="https://pypi.org/project/locus-snap/">PyPI</a><a href="https://github.com/GENCARDIO/LocusSnap">GitHub</a><a href="https://github.com/GENCARDIO/LocusSnap/issues">Issues</a></nav><p class="copyright">© <span data-year>2026</span> GENCARDIO</p></div></footer><div class="toast" role="status" aria-live="polite" data-toast></div><script src="assets/site.js"></script>
+  </body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="LocusSnap frequently asked questions and troubleshooting for BAM, CRAM, FASTA, indexed tracks, large regions, and mate views."><meta name="theme-color" content="#12202d"><link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="assets/site.css"><title>FAQ and troubleshooting — LocusSnap documentation</title><script>document.documentElement.dataset.theme = localStorage.getItem("locus-theme") || "light";</script></head>
+  <body class="docs-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header" data-header><div class="nav-shell"><a class="brand" href="index.html"><img src="assets/favicon.svg" alt="" width="36" height="36"><span>LocusSnap</span></a><button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false" data-menu-toggle><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><nav class="site-nav" aria-label="Main navigation" data-menu><a href="getting-started.html">Start</a><a href="workflows.html">Workflows</a><a href="recipes.html">Recipes</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html" aria-current="page">FAQ</a></nav><div class="nav-actions"><button class="icon-button theme-toggle" type="button" aria-label="Use dark theme" data-theme-toggle><svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg><svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg></button><a class="button button-small button-ghost" href="https://github.com/GENCARDIO/LocusSnap">GitHub</a></div></div></header>
+    <main id="main">
+      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Help</p><h1>FAQ &amp; troubleshooting</h1><p>Fast checks for the failures most often caused by indexing, reference compatibility, coordinate conventions, or display scale.</p></div></section>
+      <div class="docs-layout">
+        <aside class="docs-sidebar"><p class="docs-sidebar-label">Documentation</p><nav><a href="getting-started.html">Getting started</a><a href="workflows.html">Workflow guides</a><a href="recipes.html">Recipes</a><a href="configuration.html">Configuration</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html" aria-current="page">FAQ</a></nav><p class="docs-sidebar-label">Topics</p><nav><a href="#index">Indexes</a><a href="#cram">CRAM</a><a href="#reference">Reference bases</a><a href="#tracks">Tracks</a><a href="#performance">Large windows</a><a href="#mates">Mate views</a><a href="#report">Reporting bugs</a></nav></aside>
+        <article class="docs-content">
+          <p class="docs-lede">Start by running the same locus with the smallest viable command. Once BAM access works, add FASTA, annotations, special views, and styling back one group at a time.</p>
+
+          <h2 id="index">“The BAM has no index”</h2>
+          <p>Coordinate-sort and index the file. For BAM:</p><pre><code>samtools sort -o sample.sorted.bam sample.bam
+samtools index sample.sorted.bam</code></pre>
+          <p>The index should normally be named <code>sample.sorted.bam.bai</code> or <code>sample.sorted.bai</code>. CRAM uses a <code>.crai</code> index.</p>
+
+          <h2 id="cram">CRAM fails to open or decode</h2>
+          <p>Supply the exact reference assembly used to create the CRAM:</p><pre><code>samtools faidx reference.fa
+locus-snap --bam sample.cram --fasta reference.fa \
+  --region chr1:100001-101000</code></pre>
+          <p>A FASTA from a different patch release can fail even when chromosome names look identical.</p>
+
+          <h2 id="reference">Reference bases or mismatches are missing</h2>
+          <ul><li>Provide <code>--fasta</code> and make sure its contig names match the alignment file.</li><li>Zoom below <code>--max_reference_span</code>, which defaults to 250 bp.</li><li>Set <code>--max_reference_span 0</code> only when you deliberately want to hide the base track.</li><li>Remember that CLI regions are 1-based inclusive.</li></ul>
+
+          <h2 id="tracks">A genomic track is empty</h2>
+          <h3>Compressed track lacks an index</h3>
+          <p>Ordinary gzip is not enough for regional access. Create a BGZF file and tabix index:</p><pre><code>bgzip annotations.bed
+tabix -p bed annotations.bed.gz</code></pre>
+          <p>Use the appropriate tabix preset for GFF or VCF. BigWig is self-indexed.</p>
+          <h3>Coordinates or contigs do not overlap</h3>
+          <p>BED-like formats are normally zero-based and half-open; VCF positions are 1-based. Verify <code>chr1</code> versus <code>1</code> and inspect a few records with <code>tabix FILE REGION</code>.</p>
+          <h3>The automatic gene track is missing</h3>
+          <p>Automatic RefSeq selection requires an exact BAM contig-length match for a supported human assembly. Choose <code>--refseq hg38</code> or <code>--refseq hg19</code>, provide an explicit GTF/GFF, or use <code>--refseq none</code>.</p>
+
+          <h2 id="performance">The image is too tall or memory-heavy</h2>
+          <p>Use compact rows and cap only the visual layer:</p><pre><code>locus-snap --bam deep.bam --region chr1:100001-120000 \
+  --display_mode squish \
+  --max_alignment_depth 100 \
+  --max_rows 80</code></pre>
+          <p>Coverage, summaries, and TSV exports still use all retained reads. For a broad track-only overview, add <code>--no_alignments</code>.</p>
+
+          <h2 id="mates">Mate view cannot find a locus</h2>
+          <p>The selected evidence source needs enough partner coordinates:</p><pre><code>--mate_view --mate_window_source discordant
+--mate_view --mate_window_source split
+--mate_view --mate_window_source softclip</code></pre>
+          <p>If you already know both breakpoints, repeated <code>--region</code> with <code>--link_breakpoints</code> is deterministic and usually clearer.</p>
+
+          <h2>Why are low-MAPQ reads pale?</h2>
+          <p>Alignment fills are shaded by MAPQ up to <code>--mapq_cap</code>. Use <code>--no_mapq_shading</code> when uniform fill is preferable.</p>
+
+          <h2>Why are only some soft-clipped bases labelled?</h2>
+          <p>Individual nucleotides are intentionally limited to close windows where letters fit. At wider spans, the soft-clipped read segment remains visible without unreadable text.</p>
+
+          <h2>Can LocusSnap read raw <code>.hic</code> or <code>.cool</code> matrices?</h2>
+          <p>Not directly. Export called TADs to BED-like intervals, called loops to BEDPE, or binned cis contacts to scored BEDPE. LocusSnap renders those processed features alongside the locus.</p>
+
+          <h2 id="report">Report a reproducible problem</h2>
+          <p>Open a <a href="https://github.com/GENCARDIO/LocusSnap/issues">GitHub issue</a> with:</p><ul><li><code>locus-snap --help</code> version context and <code>python --version</code>;</li><li>the complete command with sensitive paths anonymized;</li><li>the traceback or terminal error;</li><li>input format, index presence, reference assembly, and contig naming convention;</li><li>a minimal synthetic or shareable locus when possible.</li></ul>
+          <pre><code>python -c "import locus_snap; print(locus_snap.__version__)"
+samtools quickcheck -v sample.bam
+samtools view -H sample.bam | head</code></pre>
+          <nav class="page-nav"><a href="gallery.html"><small>Previous</small><strong>← Gallery</strong></a><a href="getting-started.html"><small>Start again</small><strong>Getting started →</strong></a></nav>
+        </article>
+      </div>
+    </main>
+    <footer class="site-footer"><div class="page-shell footer-grid"><div><a class="brand footer-brand" href="index.html"><img src="assets/favicon.svg" alt="" width="32" height="32"><span>LocusSnap</span></a><p>IGV-like genomic snapshots from the command line.</p></div><nav><a href="getting-started.html">Docs</a><a href="https://pypi.org/project/locus-snap/">PyPI</a><a href="https://github.com/GENCARDIO/LocusSnap">GitHub</a><a href="https://github.com/GENCARDIO/LocusSnap/issues">Issues</a></nav><p class="copyright">© <span data-year>2026</span> GENCARDIO</p></div></footer><div class="toast" role="status" aria-live="polite" data-toast></div><script src="assets/site.js"></script>
+  </body>
+</html>
