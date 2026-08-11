@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Install LocusSnap and create an IGV-like genomic snapshot from an indexed BAM or CRAM file.">
+    <meta name="theme-color" content="#12202d">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <title>Getting started — LocusSnap documentation</title>
+    <script>document.documentElement.dataset.theme = localStorage.getItem("locus-theme") || "light";</script>
+  </head>
+  <body class="docs-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header" data-header>
+      <div class="nav-shell">
+        <a class="brand" href="index.html"><img src="assets/favicon.svg" alt="" width="36" height="36"><span>LocusSnap</span></a>
+        <button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false" data-menu-toggle><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+        <nav class="site-nav" aria-label="Main navigation" data-menu>
+          <a href="getting-started.html" aria-current="page">Start</a><a href="workflows.html">Workflows</a><a href="recipes.html">Recipes</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a>
+        </nav>
+        <div class="nav-actions"><button class="icon-button theme-toggle" type="button" aria-label="Use dark theme" data-theme-toggle><svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg><svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg></button><a class="button button-small button-ghost" href="https://github.com/GENCARDIO/LocusSnap">GitHub</a></div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Start here</p><h1>Getting started</h1><p>Install LocusSnap, prepare indexed sequencing files, and produce your first reproducible locus figure.</p></div></section>
+      <div class="docs-layout">
+        <aside class="docs-sidebar" aria-label="Documentation sections">
+          <p class="docs-sidebar-label">Documentation</p>
+          <nav><a href="getting-started.html" aria-current="page">Getting started</a><a href="workflows.html">Workflow guides</a><a href="recipes.html">Recipes</a><a href="configuration.html">Configuration</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav>
+          <p class="docs-sidebar-label">On this page</p>
+          <nav><a href="#install">Installation</a><a href="#inputs">Prepare inputs</a><a href="#first-plot">First snapshot</a><a href="#interpret">Read the result</a><a href="#next">Next steps</a></nav>
+        </aside>
+
+        <article class="docs-content">
+          <p class="docs-lede">The shortest path is an indexed BAM, a genomic interval, and one command. Add a matching FASTA when you want reference bases, mismatch colours, or CRAM decoding.</p>
+          <div class="docs-toc"><strong>What you will do</strong><ul><li><a href="#install">Install the command</a></li><li><a href="#inputs">Check your input files</a></li><li><a href="#first-plot">Render a locus</a></li><li><a href="#next">Choose the next workflow</a></li></ul></div>
+
+          <h2 id="install">Installation</h2>
+          <h3>Install from PyPI</h3>
+          <pre><code>python3 -m pip install locus-snap
+locus-snap --help</code></pre>
+          <p>LocusSnap supports Python 3.9 and newer. For a reproducible environment:</p>
+          <pre><code>python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install locus-snap</code></pre>
+
+          <h3>Install the current source checkout</h3>
+          <pre><code>git clone https://github.com/GENCARDIO/LocusSnap.git
+cd LocusSnap
+python -m pip install -e ".[dev]"
+pytest -q</code></pre>
+          <p>The compatibility entry points <code>python3 locus_snap.py</code> and <code>python3 -m locus_snap</code> accept the same arguments as <code>locus-snap</code>.</p>
+
+          <h2 id="inputs">Prepare the inputs</h2>
+          <table>
+            <thead><tr><th>Input</th><th>Requirement</th><th>Why it is used</th></tr></thead>
+            <tbody>
+              <tr><td>BAM</td><td>Coordinate-sorted and indexed</td><td>Alignments, coverage, pair geometry, tags, CIGAR and SA evidence.</td></tr>
+              <tr><td>CRAM</td><td>Indexed, plus matching FASTA</td><td>Same evidence as BAM; the reference is required for decoding.</td></tr>
+              <tr><td>FASTA</td><td>Matching assembly; indexable</td><td>Reference bases, mismatches, splice motifs, and CRAM decoding.</td></tr>
+              <tr><td>Region</td><td><code>chrom:start-end</code></td><td>Coordinates are 1-based and inclusive.</td></tr>
+            </tbody>
+          </table>
+          <pre><code>samtools sort -o sample.sorted.bam sample.bam
+samtools index sample.sorted.bam
+samtools faidx reference.fa</code></pre>
+          <div class="callout"><strong>Contig names must agree.</strong><p>If the BAM uses <code>chr1</code>, the FASTA and annotation tracks must normally use <code>chr1</code> too. A <code>1</code>/<code>chr1</code> mismatch is a common reason for an empty track.</p></div>
+
+          <h2 id="first-plot">Create the first snapshot</h2>
+          <pre><code>locus-snap \
+  --bam sample.sorted.bam \
+  --fasta reference.fa \
+  --region chr9:101867481-101867620 \
+  --output_dir out \
+  --output_name locus</code></pre>
+          <p>The result is <code>out/locus.png</code>. Human hg19/GRCh37 and hg38/GRCh38 BAMs can receive automatic cytoband and RefSeq context. Disable network-backed RefSeq resolution with <code>--refseq none</code>.</p>
+
+          <h3>Choose another output format</h3>
+          <pre><code># Editable vector output
+locus-snap --bam sample.bam --region chr1:1000-2000 \
+  --output_name figure.svg
+
+# Publication-resolution raster output
+locus-snap --bam sample.bam --region chr1:1000-2000 \
+  --output_name figure.png --fig_width 16 --dpi 300</code></pre>
+          <p>Supported formats are PNG, SVG/SVGZ, PDF, JPEG, TIFF, and WebP.</p>
+
+          <h2 id="interpret">Read the result</h2>
+          <ul>
+            <li>The chromosome overview marks the displayed interval in red.</li>
+            <li>The scale bar and genomic axis report the local span.</li>
+            <li>Coverage is calculated from all retained reads, even when alignment rows are downsampled.</li>
+            <li>At close zoom, mismatching and soft-clipped nucleotides use IGV-compatible base colours.</li>
+            <li>The Alignment legend explains concordant, discordant, insertion, deletion, and strand-specific evidence that is present.</li>
+          </ul>
+
+          <h2 id="next">Choose a next step</h2>
+          <div class="task-grid">
+            <a class="task-card" href="workflows.html#small-variants"><strong>Review a small variant</strong><span>Sort by an SNV and show allele counts.</span></a>
+            <a class="task-card" href="workflows.html#structural-variants"><strong>Inspect a structural event</strong><span>Pair views, mate windows, and linked loci.</span></a>
+            <a class="task-card" href="workflows.html#rna"><strong>Analyse RNA junctions</strong><span>Annotated splicing and fusion evidence.</span></a>
+            <a class="task-card" href="workflows.html#batch"><strong>Review a candidate set</strong><span>Multi-sample batch reports.</span></a>
+          </div>
+
+          <nav class="page-nav" aria-label="Adjacent documentation"><a href="index.html"><small>Back</small><strong>Project home</strong></a><a href="workflows.html"><small>Next</small><strong>Workflow guides →</strong></a></nav>
+        </article>
+      </div>
+    </main>
+    <footer class="site-footer"><div class="page-shell footer-grid"><div><a class="brand footer-brand" href="index.html"><img src="assets/favicon.svg" alt="" width="32" height="32"><span>LocusSnap</span></a><p>IGV-like genomic snapshots from the command line.</p></div><nav><a href="getting-started.html">Docs</a><a href="https://pypi.org/project/locus-snap/">PyPI</a><a href="https://github.com/GENCARDIO/LocusSnap">GitHub</a><a href="https://github.com/GENCARDIO/LocusSnap/issues">Issues</a></nav><p class="copyright">© <span data-year>2026</span> GENCARDIO</p></div></footer>
+    <div class="toast" role="status" aria-live="polite" data-toast></div><script src="assets/site.js"></script>
+  </body>
+</html>

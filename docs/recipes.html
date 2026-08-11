@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Copyable LocusSnap command recipes for common genomic visualization tasks."><meta name="theme-color" content="#12202d"><link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="assets/site.css"><title>Recipes — LocusSnap documentation</title><script>document.documentElement.dataset.theme = localStorage.getItem("locus-theme") || "light";</script></head>
+  <body class="docs-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header" data-header><div class="nav-shell"><a class="brand" href="index.html"><img src="assets/favicon.svg" alt="" width="36" height="36"><span>LocusSnap</span></a><button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false" data-menu-toggle><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><nav class="site-nav" aria-label="Main navigation" data-menu><a href="getting-started.html">Start</a><a href="workflows.html">Workflows</a><a href="recipes.html" aria-current="page">Recipes</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><div class="nav-actions"><button class="icon-button theme-toggle" type="button" aria-label="Use dark theme" data-theme-toggle><svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg><svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg></button><a class="button button-small button-ghost" href="https://github.com/GENCARDIO/LocusSnap">GitHub</a></div></div></header>
+    <main id="main">
+      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Copy and adapt</p><h1>Recipes</h1><p>Compact command patterns for routine analysis. Replace paths and coordinates, then layer in only the options your figure needs.</p></div></section>
+      <div class="docs-layout">
+        <aside class="docs-sidebar"><p class="docs-sidebar-label">Documentation</p><nav><a href="getting-started.html">Getting started</a><a href="workflows.html">Workflow guides</a><a href="recipes.html" aria-current="page">Recipes</a><a href="configuration.html">Configuration</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><p class="docs-sidebar-label">Recipes</p><nav><a href="#minimal">Minimal</a><a href="#publication">Publication</a><a href="#tracks">Tracks</a><a href="#samples">Samples</a><a href="#evidence">Read evidence</a><a href="#exports">Exports</a></nav></aside>
+        <article class="docs-content">
+          <p class="docs-lede">Every recipe uses 1-based inclusive command-line regions. Track files retain the coordinate convention of their own format—for example, BED is zero-based and half-open.</p>
+
+          <h2 id="minimal">Minimal snapshots</h2>
+          <h3>Indexed BAM</h3><pre><code>locus-snap --bam sample.bam --region chr1:100001-101000 \
+  --output_dir out --output_name locus</code></pre>
+          <h3>CRAM with its reference</h3><pre><code>locus-snap --bam sample.cram --fasta GRCh38.fa \
+  --region chr1:100001-101000 --output_name cram-locus</code></pre>
+          <h3>Add context around a point variant</h3><pre><code>locus-snap --bam sample.bam --region chr7:140453136-140453136 \
+  --flank 75 --center_guide --output_name point-variant</code></pre>
+
+          <h2 id="publication">Publication output</h2>
+          <h3>Vector SVG</h3><pre><code>locus-snap --bam sample.bam --region chr1:100001-101000 \
+  --output_name figure.svg --fig_width 16</code></pre>
+          <h3>High-resolution PNG with right-aligned title</h3><pre><code>locus-snap --bam sample.bam --region chr1:100001-101000 \
+  --title_align right --fig_width 16 --dpi 300 \
+  --output_name figure.png</code></pre>
+          <h3>Clean panel without legend or genomic grid</h3><pre><code>locus-snap --bam sample.bam --region chr1:100001-101000 \
+  --no_legend --grid_mode none --no_ideogram --output_name clean</code></pre>
+          <h3>Highlight an interval through all tracks</h3><pre><code>locus-snap --bam sample.bam --region chr1:100001-101000 \
+  --highlight chr1:100420-100510 \
+  --highlight_color '#ffd54f' --highlight_alpha 0.22</code></pre>
+
+          <h2 id="tracks">Annotation and signal tracks</h2>
+          <h3>Automatic and custom transcript tracks</h3><pre><code># Built-in human RefSeq selection
+locus-snap --bam sample.bam --region chr17:7668000-7680000 --refseq hg38
+
+# Explicit GTF
+locus-snap --bam sample.bam --region chr17:7668000-7680000 \
+  --custom_track 'genes.gtf.gz,gtf,Transcripts,#17217a,collapse,0.8'</code></pre>
+          <h3>Signal, peaks, variants, and CNV</h3><pre><code>locus-snap --bam sample.bam --region chr8:127000000-129000000 \
+  --track accessibility.bw \
+  --custom_track 'peaks.narrowPeak,narrowpeak,ATAC peaks,#188977,density,0.7' \
+  --custom_track 'calls.vcf.gz,vcf,Variants,#d95d55,pack,0.8' \
+  --custom_track 'segments.seg,seg,Copy number,#4c7edb,collapse,0.8'</code></pre>
+          <div class="callout"><strong>Compressed interval tracks need indexes.</strong><p>Use BGZF plus tabix for BED, GFF/GTF, VCF, peak, TAD, signal, and BEDPE inputs.</p></div>
+
+          <h2 id="samples">Samples and loci</h2>
+          <h3>Stack samples</h3><pre><code>locus-snap \
+  --bam tumour.bam --sample_label Tumour \
+  --bam normal.bam --sample_label Normal \
+  --bam relapse.bam --sample_label Relapse \
+  --region chr7:55086500-55087000 \
+  --output_name cohort-locus</code></pre>
+          <h3>Associate a VCF with each sample</h3><pre><code>locus-snap \
+  --bam tumour.bam --sample_label Tumour --vcf_companion tumour.vcf.gz \
+  --bam normal.bam --sample_label Normal --vcf_companion none \
+  --region chr7:55086500-55087000</code></pre>
+          <h3>Compare independent loci</h3><pre><code>locus-snap --bam sample.bam \
+  --region chr3:38639720-38639860 --region_label Breakpoint-A \
+  --region chr8:128747900-128748080 --region_label Breakpoint-B \
+  --link_breakpoints --output_name linked-loci</code></pre>
+
+          <h2 id="evidence">Select and organize read evidence</h2>
+          <h3>Only anomalous reads</h3><pre><code>locus-snap --bam sample.bam --region chr3:38639000-38640500 \
+  --only discordant split softclip --sort_by sa_count</code></pre>
+          <h3>Group reads by BAM tag</h3><pre><code>locus-snap --bam sample.bam --region chr1:100001-101000 \
+  --group_by_tag RG \
+  --tag_color tumour='#d95d55' --tag_color normal='#4c7edb'</code></pre>
+          <h3>Haplotype lanes</h3><pre><code>locus-snap --bam phased.bam --region chr1:100001-101000 \
+  --haplotype_view split --haplotype_filter 1 2</code></pre>
+          <h3>Large-depth locus</h3><pre><code>locus-snap --bam deep.bam --region chr1:100001-101000 \
+  --display_mode squish --max_alignment_depth 150 --max_rows 80</code></pre>
+
+          <h2 id="exports">Analysis exports</h2>
+          <h3>Per-read metrics</h3><pre><code>locus-snap --bam sample.bam --region chr1:100001-101000 \
+  --metrics_tsv read-metrics.tsv --output_name metrics-view</code></pre>
+          <h3>RNA junction and fusion table</h3><pre><code>locus-snap --bam rna.bam --fasta reference.fa \
+  --region chr2:42490000-42530000 --rna_mode \
+  --rna_evidence_tsv rna-evidence.tsv</code></pre>
+          <h3>Batch HTML report</h3><pre><code>locus-snap --bam tumour.bam --bam normal.bam \
+  --batch_regions candidates.bed --flank 100 \
+  --report report.html --threads 4 --output_dir review</code></pre>
+
+          <nav class="page-nav"><a href="workflows.html"><small>Previous</small><strong>← Workflow guides</strong></a><a href="configuration.html"><small>Next</small><strong>Configuration →</strong></a></nav>
+        </article>
+      </div>
+    </main>
+    <footer class="site-footer"><div class="page-shell footer-grid"><div><a class="brand footer-brand" href="index.html"><img src="assets/favicon.svg" alt="" width="32" height="32"><span>LocusSnap</span></a><p>IGV-like genomic snapshots from the command line.</p></div><nav><a href="getting-started.html">Docs</a><a href="https://pypi.org/project/locus-snap/">PyPI</a><a href="https://github.com/GENCARDIO/LocusSnap">GitHub</a><a href="https://github.com/GENCARDIO/LocusSnap/issues">Issues</a></nav><p class="copyright">© <span data-year>2026</span> GENCARDIO</p></div></footer><div class="toast" role="status" aria-live="polite" data-toast></div><script src="assets/site.js"></script>
+  </body>
+</html>

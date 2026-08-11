@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Task-based LocusSnap guides for variants, structural events, RNA-seq, long reads, UMI families, cohorts, and chromatin contacts.">
+    <meta name="theme-color" content="#12202d"><link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="assets/site.css">
+    <title>Workflow guides — LocusSnap documentation</title><script>document.documentElement.dataset.theme = localStorage.getItem("locus-theme") || "light";</script>
+  </head>
+  <body class="docs-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header" data-header><div class="nav-shell"><a class="brand" href="index.html"><img src="assets/favicon.svg" alt="" width="36" height="36"><span>LocusSnap</span></a><button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false" data-menu-toggle><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><nav class="site-nav" aria-label="Main navigation" data-menu><a href="getting-started.html">Start</a><a href="workflows.html" aria-current="page">Workflows</a><a href="recipes.html">Recipes</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><div class="nav-actions"><button class="icon-button theme-toggle" type="button" aria-label="Use dark theme" data-theme-toggle><svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg><svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg></button><a class="button button-small button-ghost" href="https://github.com/GENCARDIO/LocusSnap">GitHub</a></div></div></header>
+    <main id="main">
+      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Task oriented</p><h1>Workflow guides</h1><p>Choose the biological question first. Each workflow combines only the tracks and read evidence that help answer it.</p></div></section>
+      <div class="docs-layout">
+        <aside class="docs-sidebar"><p class="docs-sidebar-label">Documentation</p><nav><a href="getting-started.html">Getting started</a><a href="workflows.html" aria-current="page">Workflow guides</a><a href="recipes.html">Recipes</a><a href="configuration.html">Configuration</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><p class="docs-sidebar-label">Workflows</p><nav><a href="#small-variants">Small variants</a><a href="#structural-variants">Structural variants</a><a href="#rna">RNA-seq</a><a href="#long-reads">Long reads</a><a href="#molecules">UMI molecules</a><a href="#batch">Cohort reports</a><a href="#contacts">Hi-C contacts</a></nav></aside>
+        <article class="docs-content">
+          <p class="docs-lede">These presets are starting points. Keep the locus narrow enough for the evidence you want to inspect, and add <code>--config lab-style.yaml</code> when the same visual choices should be reused.</p>
+          <div class="task-grid">
+            <a class="task-card" href="#small-variants"><strong>SNV / indel</strong><span>Base sorting, VAF and close zoom.</span></a><a class="task-card" href="#structural-variants"><strong>Breakpoint</strong><span>Discordant pairs, split reads and mates.</span></a><a class="task-card" href="#rna"><strong>RNA-seq</strong><span>Junction classification and fusions.</span></a><a class="task-card" href="#batch"><strong>Cohort</strong><span>Repeated samples and HTML reports.</span></a>
+          </div>
+
+          <h2 id="small-variants">Small-variant review</h2>
+          <p>Use a FASTA and a close window to reveal mismatches. Sorting by the candidate base moves alternative-supporting reads together; the coverage track can display ALT/depth, VAF, strand counts, base quality, and MAPQ.</p>
+          <pre><code>locus-snap \
+  --bam tumour.bam \
+  --fasta reference.fa \
+  --region chr7:55086720-55086950 \
+  --sort_by base \
+  --sort_base_position 55086812 \
+  --show_variant_counts \
+  --min_baseq 20 \
+  --min_variant_mapq 20 \
+  --center_guide \
+  --output_name snv-review</code></pre>
+          <div class="callout"><strong>Close zoom is intentional.</strong><p>Reference and individual read bases are shown only below the configured reference-span threshold. This avoids unreadable letters over broad regions.</p></div>
+
+          <h2 id="structural-variants">Structural variants and translocations</h2>
+          <h3>Pair evidence within one locus</h3>
+          <pre><code>locus-snap \
+  --bam sample.bam \
+  --region chr3:38639200-38640200 \
+  --view_as_pairs \
+  --only discordant split softclip \
+  --sort_by sa_count \
+  --show_indel_lengths \
+  --output_name breakpoint-evidence</code></pre>
+          <h3>Linked partner loci</h3>
+          <pre><code>locus-snap \
+  --bam sample.bam \
+  --region chr3:38639720-38639860 \
+  --region chr8:128747900-128748080 \
+  --region_label 'Left breakpoint' \
+  --region_label 'Right breakpoint' \
+  --link_breakpoints \
+  --view_as_pairs \
+  --output_name translocation</code></pre>
+          <p>Use <code>--mate_view</code> when the partner is not known in advance. LocusSnap estimates a mate window from discordant pairs, split alignments, or soft clips.</p>
+
+          <h2 id="rna">RNA-seq junctions and fusions</h2>
+          <p>The RNA preset reads splice junctions from CIGAR <code>N</code> operations, compares boundaries with visible BED12/GFF/GTF models, derives motifs from FASTA, and clusters fusion support from SA tags plus distant or inter-chromosomal mates.</p>
+          <pre><code>locus-snap \
+  --bam tumour-rna.bam \
+  --fasta reference.fa \
+  --region chr2:42490000-42530000 \
+  --track transcripts.gtf.gz \
+  --rna_mode \
+  --min_junction_reads 3 \
+  --min_junction_anchor 12 \
+  --sashimi_strand split \
+  --rna_strandness reverse \
+  --junction_labels full \
+  --min_fusion_reads 3 \
+  --rna_evidence_tsv rna-evidence.tsv \
+  --output_name rna-review</code></pre>
+          <ul><li><strong>K</strong> denotes an annotated exon boundary; <strong>N</strong> denotes a novel junction.</li><li>Full labels add canonical motifs such as <code>GT-AG</code>.</li><li>Fusion support is labelled <code>S#/P#</code> for unique split reads and spanning pairs.</li></ul>
+
+          <h2 id="long-reads">Long reads and base modifications</h2>
+          <pre><code>locus-snap \
+  --bam nanopore.bam \
+  --fasta reference.fa \
+  --region chr12:100000-112000 \
+  --long_read_mode \
+  --modification_code 5mC \
+  --min_mod_probability 0.8 \
+  --output_name long-read-mods</code></pre>
+          <p>MM/ML calls are drawn on reads and summarized as a modification-fraction track. Use <code>--base_modifications</code> instead when modification display is wanted without the long-read colour preset.</p>
+
+          <h2 id="molecules">UMI molecule consensus</h2>
+          <pre><code>locus-snap \
+  --bam targeted.bam \
+  --fasta reference.fa \
+  --region chr17:7577000-7577200 \
+  --molecule_mode \
+  --molecule_tag auto \
+  --min_family_size 2 \
+  --molecule_consensus_fraction 0.7 \
+  --show_variant_counts \
+  --output_name molecule-evidence</code></pre>
+          <p>Positional MI/RX/UB families collapse into consensus molecules. Coverage and VAF then represent independent molecules rather than PCR copies.</p>
+
+          <h2 id="batch">Multi-sample and batch reports</h2>
+          <pre><code>locus-snap \
+  --bam tumour.bam --sample_label Tumour \
+  --bam normal.bam --sample_label Normal \
+  --bam relapse.bam --sample_label Relapse \
+  --batch_regions candidates.vcf.gz \
+  --flank 100 \
+  --report review/report.html \
+  --threads 4 \
+  --output_dir review/plots</code></pre>
+          <p>The report is self-contained and retains input order. Repeated <code>--vcf_companion</code> values can add one variant track per sample; use <code>none</code> as a placeholder.</p>
+
+          <h2 id="contacts">Hi-C TADs and chromatin loops</h2>
+          <p>LocusSnap accepts domain/TAD intervals, BEDPE loops, and contact-matrix tracks. These can be combined with genes, variants, and alignments around a locus.</p>
+          <pre><code>locus-snap \
+  --bam sample.bam \
+  --region chr8:127000000-130000000 \
+  --track domains.tad.bed \
+  --track loops.bedpe.gz \
+  --custom_track 'contacts.bedpe,bedpe,Hi-C contacts,#a50f15,triangle,1.2' \
+  --no_alignments \
+  --output_name chromatin-context</code></pre>
+          <p>Contact maps use a reddish sequential palette by default. Track configuration controls triangular orientation and visual height; see <a href="configuration.html#tracks">Configuration</a>.</p>
+
+          <nav class="page-nav"><a href="getting-started.html"><small>Previous</small><strong>← Getting started</strong></a><a href="recipes.html"><small>Next</small><strong>Recipes →</strong></a></nav>
+        </article>
+      </div>
+    </main>
+    <footer class="site-footer"><div class="page-shell footer-grid"><div><a class="brand footer-brand" href="index.html"><img src="assets/favicon.svg" alt="" width="32" height="32"><span>LocusSnap</span></a><p>IGV-like genomic snapshots from the command line.</p></div><nav><a href="getting-started.html">Docs</a><a href="https://pypi.org/project/locus-snap/">PyPI</a><a href="https://github.com/GENCARDIO/LocusSnap">GitHub</a><a href="https://github.com/GENCARDIO/LocusSnap/issues">Issues</a></nav><p class="copyright">© <span data-year>2026</span> GENCARDIO</p></div></footer><div class="toast" role="status" aria-live="polite" data-toast></div><script src="assets/site.js"></script>
+  </body>
+</html>

@@ -34,9 +34,9 @@
 
         <nav class="site-nav" aria-label="Main navigation" data-menu>
           <a href="#features">Features</a>
-          <a href="#gallery">Gallery</a>
+          <a href="gallery.html">Gallery</a>
           <a href="#quickstart">Quick start</a>
-          <a href="https://github.com/GENCARDIO/LocusSnap#options-people-use-most">Documentation</a>
+          <a href="getting-started.html">Documentation</a>
         </nav>
 
         <div class="nav-actions">
@@ -56,7 +56,7 @@
       <section class="hero" id="top">
         <div class="hero-grid page-shell">
           <div class="hero-copy">
-            <p class="eyebrow"><span class="status-dot"></span> Version 0.2.0 · Open source</p>
+            <p class="eyebrow"><span class="status-dot"></span> Version 0.3.0 · Open source</p>
             <h1>Genomic evidence,<br><span>ready to share.</span></h1>
             <p class="hero-lede">Create clear, IGV-like snapshots from indexed BAM files—complete with alignments, coverage, variants, genes, companion tracks, and publication-ready styling.</p>
             <div class="hero-actions">
@@ -170,6 +170,49 @@
         </div>
       </section>
 
+      <section class="section docs-overview page-shell" id="documentation">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Documentation</p>
+            <h2>Start with the job you need to do.</h2>
+          </div>
+          <p>The guide is separated into short entry points, task-based workflows, copyable recipes, and reference material so you do not have to search one long README.</p>
+        </div>
+
+        <div class="docs-card-grid">
+          <a class="docs-card" href="getting-started.html">
+            <span class="docs-card-number">01</span>
+            <strong>Getting started</strong>
+            <small>Install LocusSnap, prepare BAM/CRAM and FASTA files, and render the first locus.</small>
+          </a>
+          <a class="docs-card" href="workflows.html">
+            <span class="docs-card-number">02</span>
+            <strong>Workflow guides</strong>
+            <small>Variants, structural events, RNA-seq, long reads, UMI consensus, cohorts, and Hi-C.</small>
+          </a>
+          <a class="docs-card" href="recipes.html">
+            <span class="docs-card-number">03</span>
+            <strong>Recipes</strong>
+            <small>Copy-paste commands for common review and publication tasks.</small>
+          </a>
+          <a class="docs-card" href="configuration.html">
+            <span class="docs-card-number">04</span>
+            <strong>Configuration</strong>
+            <small>YAML presets, colours, grids, dimensions, highlights, tracks, and plugins.</small>
+          </a>
+          <a class="docs-card" href="reference.html">
+            <span class="docs-card-number">05</span>
+            <strong>Reference</strong>
+            <small>CLI option groups, input formats, Python API, exports, and compatibility.</small>
+          </a>
+          <a class="docs-card" href="faq.html">
+            <span class="docs-card-number">06</span>
+            <strong>FAQ &amp; troubleshooting</strong>
+            <small>Indexes, CRAM references, missing tracks, large windows, and mate views.</small>
+          </a>
+        </div>
+      </section>
+
       <section class="section gallery-section" id="gallery">
         <div class="page-shell">
           <div class="section-heading gallery-heading">
@@ -245,7 +288,7 @@
               <li><span>2</span><div><strong>Index your BAM</strong><small>Run <code>samtools index sample.bam</code> if needed</small></div></li>
               <li><span>3</span><div><strong>Render the locus</strong><small>PNG is the default; vector formats are available</small></div></li>
             </ol>
-            <a class="text-link" href="https://github.com/GENCARDIO/LocusSnap#basic-usage">Read the complete documentation <span aria-hidden="true">→</span></a>
+            <a class="text-link" href="getting-started.html">Read the complete getting-started guide <span aria-hidden="true">→</span></a>
           </div>
 
           <div class="code-window">
@@ -293,6 +336,7 @@
           <p>IGV-like genomic snapshots from the command line.</p>
         </div>
         <nav aria-label="Footer navigation">
+          <a href="getting-started.html">Documentation</a>
           <a href="https://github.com/GENCARDIO/LocusSnap">GitHub</a>
           <a href="https://pypi.org/project/locus-snap/">PyPI</a>
           <a href="https://github.com/GENCARDIO/LocusSnap/issues">Issues</a>

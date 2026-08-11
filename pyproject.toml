@@ -38,6 +38,7 @@ locus-snap = "locus_snap.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/GENCARDIO/LocusSnap"
+Documentation = "https://gencardio.github.io/LocusSnap/"
 Repository = "https://github.com/GENCARDIO/LocusSnap"
 Issues = "https://github.com/GENCARDIO/LocusSnap/issues"
 

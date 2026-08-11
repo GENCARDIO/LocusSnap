@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Configure LocusSnap layouts, colours, tracks, grids, highlights, and plugin tracks with YAML and command-line options."><meta name="theme-color" content="#12202d"><link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="assets/site.css"><title>Configuration — LocusSnap documentation</title><script>document.documentElement.dataset.theme = localStorage.getItem("locus-theme") || "light";</script></head>
+  <body class="docs-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header" data-header><div class="nav-shell"><a class="brand" href="index.html"><img src="assets/favicon.svg" alt="" width="36" height="36"><span>LocusSnap</span></a><button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false" data-menu-toggle><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><nav class="site-nav" aria-label="Main navigation" data-menu><a href="getting-started.html">Start</a><a href="workflows.html">Workflows</a><a href="recipes.html">Recipes</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><div class="nav-actions"><button class="icon-button theme-toggle" type="button" aria-label="Use dark theme" data-theme-toggle><svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg><svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg></button><a class="button button-small button-ghost" href="https://github.com/GENCARDIO/LocusSnap">GitHub</a></div></div></header>
+    <main id="main">
+      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Reusable styling</p><h1>Configuration</h1><p>Move stable preferences into YAML, keep locus-specific choices on the command line, and compose genomic context through built-in or plugin tracks.</p></div></section>
+      <div class="docs-layout">
+        <aside class="docs-sidebar"><p class="docs-sidebar-label">Documentation</p><nav><a href="getting-started.html">Getting started</a><a href="workflows.html">Workflow guides</a><a href="recipes.html">Recipes</a><a href="configuration.html" aria-current="page">Configuration</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><p class="docs-sidebar-label">On this page</p><nav><a href="#yaml">YAML anatomy</a><a href="#precedence">Precedence</a><a href="#layout">Layout</a><a href="#colours">Colours</a><a href="#tracks">Tracks</a><a href="#plugins">Plugins</a></nav></aside>
+        <article class="docs-content">
+          <p class="docs-lede">Start from the repository’s <a href="https://github.com/GENCARDIO/LocusSnap/blob/main/config.example.yaml">fully annotated configuration example</a>. LocusSnap validates unknown keys, invalid colours, impossible dimensions, and out-of-range opacity values early.</p>
+
+          <h2 id="yaml">YAML anatomy</h2>
+          <pre><code>preferences:
+  display_mode: squish
+  layout: pack
+  grid_mode: major
+  show_legend: true
+  max_alignment_depth: 100
+  title_align: left
+
+base_colors:
+  A: "#00b700"
+  C: "#0000ff"
+  G: "#d89000"
+  T: "#ff0000"
+
+visual_colors:
+  alignment_normal: "#b8b8b8"
+  junction_annotated: "#24557f"
+  junction_novel: "#e6862d"
+  fusion_split: "#7a1f5c"
+
+styles:
+  row_height_in: 0.16
+  coverage_track_height_in: 1.35
+  sashimi_track_height_in: 1.15
+  grid_major_alpha: 0.20</code></pre>
+          <table><thead><tr><th>Section</th><th>Controls</th></tr></thead><tbody><tr><td><code>preferences</code></td><td>Reusable command defaults such as layout, filters, tracks, output and RNA/long-read modes.</td></tr><tr><td><code>base_colors</code></td><td>IGV-compatible A/C/G/T nucleotide colours.</td></tr><tr><td><code>visual_colors</code></td><td>Alignments, junctions, fusions, axes, highlights and other figure elements.</td></tr><tr><td><code>track_colors</code></td><td>Gene, VCF, peak, signal, TAD, loop, contact-map and quantitative track defaults.</td></tr><tr><td><code>styles</code></td><td>Physical heights, line widths, marker sizes, opacities and font sizes.</td></tr><tr><td>palettes</td><td>Chromosome, haplotype, tag, long-read, modification and molecule colour maps.</td></tr></tbody></table>
+
+          <h2 id="precedence">Precedence</h2>
+          <p>Explicit command-line arguments override YAML preferences. This makes a lab-wide style reusable while preserving one-off analytical choices:</p>
+          <pre><code>locus-snap --config lab-style.yaml \
+  --bam tumour.bam --region chr7:55086500-55087000 \
+  --grid_mode bands --title_align center</code></pre>
+          <div class="callout"><strong>Keep data paths out of the visual theme when possible.</strong><p>A portable theme usually contains colours, dimensions, and display defaults. Add sample-specific tracks on the command line or in a separate workflow configuration.</p></div>
+
+          <h2 id="layout">Layout and figure composition</h2>
+          <div class="option-group">
+            <div class="option-row"><code>--layout pack</code><span>Greedy IGV-style row packing; best general default.</span></div>
+            <div class="option-row"><code>--layout expand</code><span>One read per row, useful when sorting evidence.</span></div>
+            <div class="option-row"><code>--display_mode squish</code><span>Compact alignment rows for deep or multi-sample views.</span></div>
+            <div class="option-row"><code>--grid_mode major_minor</code><span>Major genomic coordinates plus subdivisions.</span></div>
+            <div class="option-row"><code>--grid_mode bands</code><span>Alternating genomic background bands.</span></div>
+            <div class="option-row"><code>--title_align left|center|right</code><span>Places the figure-level title and subtitle.</span></div>
+            <div class="option-row"><code>--no_legend</code><span>Removes the legend and reclaims its figure space.</span></div>
+          </div>
+          <p>Use <code>--highlight</code> repeatedly to shade user-defined intervals through every applicable track.</p>
+
+          <h2 id="colours">Colour conventions</h2>
+          <p>The default base palette follows IGV: adenine green, cytosine blue, guanine orange, and thymine red. Alignment colour categories share one legend bucket and appear only when present. Small-insert evidence uses a darker variant of the RR palette.</p>
+          <p>Matplotlib colour names, hex strings, and other Matplotlib-compatible colour forms are accepted. Quote hex values in YAML and shell commands.</p>
+
+          <h2 id="tracks">Genomic and quantitative tracks</h2>
+          <p>Use <code>--track PATH</code> for automatic format detection. Use <code>--custom_track</code> for explicit control:</p>
+          <pre><code>--custom_track 'PATH,KIND,LABEL,COLOR,DISPLAY_MODE,HEIGHT_IN'</code></pre>
+          <table><thead><tr><th>Family</th><th>Kinds / formats</th><th>Display modes</th></tr></thead><tbody><tr><td>Genes</td><td>BED/BED12, GFF3, GTF</td><td>collapse, pack, expand, density</td></tr><tr><td>Variants</td><td>VCF, VCF.GZ, BCF</td><td>collapse, pack, density</td></tr><tr><td>Regulatory</td><td>narrowPeak, broadPeak</td><td>collapse, pack, density</td></tr><tr><td>Signal</td><td>BigWig, bedGraph, signal</td><td>collapse</td></tr><tr><td>Copy number</td><td>SEG, CNV, log2, BAF VCF</td><td>collapse</td></tr><tr><td>Chromatin</td><td>TAD/domain BED, BEDPE loops/contacts</td><td>collapse, arcs, triangle</td></tr></tbody></table>
+          <h3>Hi-C contact-map styling</h3>
+          <pre><code>track_colors:
+  hic_contact_low: "#fff5f0"
+  hic_loop: "#b2182b"
+styles:
+  hic_track_height_in: 1.20
+  hic_contact_gamma: 0.68
+  hic_contact_map_alpha: 0.96
+  hic_contact_cell_edge_width: 0.12</code></pre>
+          <p>The custom-track high colour controls the strong-contact endpoint. Use BEDPE <code>arcs</code> for called loops and <code>triangle</code> for binned cis contacts.</p>
+
+          <h2 id="plugins">Custom track plugins</h2>
+          <p>External packages can implement the stable API-v1 interface without importing Matplotlib axes:</p>
+          <pre><code>from locus_snap import TrackPlugin
+
+class ScoreTrack(TrackPlugin):
+    name = "score-track"
+    default_label = "Model score"
+
+    def fetch(self, region, options):
+        return query_scores(region.chrom, region.start, region.end)
+
+    def render(self, canvas, payload, region, options):
+        canvas.set_y_limits(0, 1)
+        canvas.fill_between(payload.positions, payload.values, alpha=0.25)
+        canvas.line(payload.positions, payload.values)</code></pre>
+          <pre><code># Packaged entry point
+--plugin_track model-score sample=tumour smoothing=25
+
+# Direct import during development
+--plugin_track my_package.tracks:ScoreTrack sample=tumour</code></pre>
+          <p>See the bundled <a href="https://github.com/GENCARDIO/LocusSnap/blob/main/examples/gc_content_plugin.py">GC-content plugin</a> for a complete runnable example.</p>
+
+          <nav class="page-nav"><a href="recipes.html"><small>Previous</small><strong>← Recipes</strong></a><a href="reference.html"><small>Next</small><strong>Reference →</strong></a></nav>
+        </article>
+      </div>
+    </main>
+    <footer class="site-footer"><div class="page-shell footer-grid"><div><a class="brand footer-brand" href="index.html"><img src="assets/favicon.svg" alt="" width="32" height="32"><span>LocusSnap</span></a><p>IGV-like genomic snapshots from the command line.</p></div><nav><a href="getting-started.html">Docs</a><a href="https://pypi.org/project/locus-snap/">PyPI</a><a href="https://github.com/GENCARDIO/LocusSnap">GitHub</a><a href="https://github.com/GENCARDIO/LocusSnap/issues">Issues</a></nav><p class="copyright">© <span data-year>2026</span> GENCARDIO</p></div></footer><div class="toast" role="status" aria-live="polite" data-toast></div><script src="assets/site.js"></script>
+  </body>
+</html>
