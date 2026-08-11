@@ -5,11 +5,11 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header" data-header><div class="nav-shell"><a class="brand" href="index.html"><img src="assets/favicon.svg" alt="" width="36" height="36"><span>LocusSnap</span></a><button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false" data-menu-toggle><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><nav class="site-nav" aria-label="Main navigation" data-menu><a href="getting-started.html">Start</a><a href="workflows.html">Workflows</a><a href="recipes.html">Recipes</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><div class="nav-actions"><button class="icon-button theme-toggle" type="button" aria-label="Use dark theme" data-theme-toggle><svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg><svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg></button><a class="button button-small button-ghost" href="https://github.com/GENCARDIO/LocusSnap">GitHub</a></div></div></header>
     <main id="main">
-      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Reusable styling</p><h1>Configuration</h1><p>Move stable preferences into YAML, keep locus-specific choices on the command line, and compose genomic context through built-in or plugin tracks.</p></div></section>
+      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · YAML and tracks</p><h1>Configuration</h1><p>Define reusable defaults in YAML and override locus-specific settings on the command line.</p></div></section>
       <div class="docs-layout">
         <aside class="docs-sidebar"><p class="docs-sidebar-label">Documentation</p><nav><a href="getting-started.html">Getting started</a><a href="workflows.html">Workflow guides</a><a href="recipes.html">Recipes</a><a href="configuration.html" aria-current="page">Configuration</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><p class="docs-sidebar-label">On this page</p><nav><a href="#yaml">YAML anatomy</a><a href="#precedence">Precedence</a><a href="#layout">Layout</a><a href="#colours">Colours</a><a href="#tracks">Tracks</a><a href="#plugins">Plugins</a></nav></aside>
         <article class="docs-content">
-          <p class="docs-lede">Start from the repository’s <a href="https://github.com/GENCARDIO/LocusSnap/blob/main/config.example.yaml">fully annotated configuration example</a>. LocusSnap validates unknown keys, invalid colours, impossible dimensions, and out-of-range opacity values early.</p>
+          <p class="docs-lede">Copy the repository’s <a href="https://github.com/GENCARDIO/LocusSnap/blob/main/config.example.yaml">annotated configuration example</a>. Validation rejects unknown keys, invalid colours, non-positive dimensions, and out-of-range opacity values.</p>
 
           <h2 id="yaml">YAML anatomy</h2>
           <pre><code>preferences:
@@ -40,11 +40,11 @@ styles:
           <table><thead><tr><th>Section</th><th>Controls</th></tr></thead><tbody><tr><td><code>preferences</code></td><td>Reusable command defaults such as layout, filters, tracks, output and RNA/long-read modes.</td></tr><tr><td><code>base_colors</code></td><td>IGV-compatible A/C/G/T nucleotide colours.</td></tr><tr><td><code>visual_colors</code></td><td>Alignments, junctions, fusions, axes, highlights and other figure elements.</td></tr><tr><td><code>track_colors</code></td><td>Gene, VCF, peak, signal, TAD, loop, contact-map and quantitative track defaults.</td></tr><tr><td><code>styles</code></td><td>Physical heights, line widths, marker sizes, opacities and font sizes.</td></tr><tr><td>palettes</td><td>Chromosome, haplotype, tag, long-read, modification and molecule colour maps.</td></tr></tbody></table>
 
           <h2 id="precedence">Precedence</h2>
-          <p>Explicit command-line arguments override YAML preferences. This makes a lab-wide style reusable while preserving one-off analytical choices:</p>
+          <p>Explicit command-line arguments override YAML preferences:</p>
           <pre><code>locus-snap --config lab-style.yaml \
   --bam tumour.bam --region chr7:55086500-55087000 \
   --grid_mode bands --title_align center</code></pre>
-          <div class="callout"><strong>Keep data paths out of the visual theme when possible.</strong><p>A portable theme usually contains colours, dimensions, and display defaults. Add sample-specific tracks on the command line or in a separate workflow configuration.</p></div>
+          <div class="callout"><strong>Separate styling from sample paths.</strong><p>Store colours, dimensions, and display defaults in the shared YAML. Supply sample-specific tracks on the command line or in a workflow-specific YAML.</p></div>
 
           <h2 id="layout">Layout and figure composition</h2>
           <div class="option-group">
@@ -97,7 +97,7 @@ class ScoreTrack(TrackPlugin):
 
 # Direct import during development
 --plugin_track my_package.tracks:ScoreTrack sample=tumour</code></pre>
-          <p>See the bundled <a href="https://github.com/GENCARDIO/LocusSnap/blob/main/examples/gc_content_plugin.py">GC-content plugin</a> for a complete runnable example.</p>
+          <p>The bundled <a href="https://github.com/GENCARDIO/LocusSnap/blob/main/examples/gc_content_plugin.py">GC-content plugin</a> implements fetch, render, layout options, and direct module loading.</p>
 
           <nav class="page-nav"><a href="recipes.html"><small>Previous</small><strong>← Recipes</strong></a><a href="reference.html"><small>Next</small><strong>Reference →</strong></a></nav>
         </article>

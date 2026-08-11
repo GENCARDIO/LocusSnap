@@ -6,8 +6,6 @@ Create an IGV-like image from an indexed BAM without opening a genome browser.
 
 ## Documentation
 
-Choose the shortest entry point for the task:
-
 | Guide | Use it for |
 | --- | --- |
 | [Getting started](https://gencardio.github.io/LocusSnap/getting-started.html) | installation, input preparation, and the first snapshot |
@@ -17,10 +15,6 @@ Choose the shortest entry point for the task:
 | [Reference](https://gencardio.github.io/LocusSnap/reference.html) | CLI groups, file formats, exports, and Python API |
 | [Gallery](https://gencardio.github.io/LocusSnap/gallery.html) | the ten representative figures and their reproducible sources |
 | [FAQ](https://gencardio.github.io/LocusSnap/faq.html) | indexes, CRAM, reference compatibility, performance, and troubleshooting |
-
-The remainder of this README is the compact repository reference. The website
-organizes the same capabilities by task so new users do not need to navigate a
-single long option catalogue.
 
 ## Install
 
