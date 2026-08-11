@@ -144,6 +144,7 @@ def _render_batch_region(task: dict) -> BatchResult:
             return BatchResult(
                 region=region, output_path=snap.output_path,
                 summary=summary, summaries=[summary],
+                unit="molecules" if common_kwargs.get("molecule_mode") else "reads",
             )
 
         summaries = []
@@ -163,9 +164,13 @@ def _render_batch_region(task: dict) -> BatchResult:
             region=region, output_path=output_path,
             summary=summaries[0] if summaries else None,
             summaries=summaries,
+            unit="molecules" if common_kwargs.get("molecule_mode") else "reads",
         )
     except (OSError, ValueError) as exc:
-        return BatchResult(region=region, error=str(exc))
+        return BatchResult(
+            region=region, error=str(exc),
+            unit="molecules" if common_kwargs.get("molecule_mode") else "reads",
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -419,6 +424,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--tag_label", metavar="LABEL",
         help="Human-readable lane and legend title; defaults to 'Tag TAG'.",
     )
+    molecule_group = parser.add_argument_group("molecule and UMI consensus")
+    molecule_group.add_argument(
+        "--molecule_mode", action="store_true",
+        help=("Collapse positional MI/RX/UB families into consensus molecules. "
+              "Duplicate-flagged reads are retained for family construction; coverage "
+              "and VAF are then counted per molecule."),
+    )
+    molecule_group.add_argument(
+        "--molecule_tag", default="auto", metavar="TAG",
+        help=("Molecule tag: MI, RX, UB, or auto. Auto selects the standard tag "
+              "present on the most fetched reads, preferring MI on ties."),
+    )
+    molecule_group.add_argument(
+        "--min_family_size", type=int, default=1, metavar="N",
+        help="Keep molecule families containing at least N alignments.",
+    )
+    molecule_group.add_argument(
+        "--molecule_position_tolerance", type=int, default=2, metavar="BP",
+        help="Maximum start/end difference used to join equal UMIs into one family.",
+    )
+    molecule_group.add_argument(
+        "--molecule_consensus_fraction", type=float, default=0.60, metavar="FRACTION",
+        help="Minimum within-family agreement required to call a consensus base.",
+    )
     long_read_group = parser.add_argument_group("long reads and base modifications")
     long_read_group.add_argument(
         "--long_read_mode", action="store_true",
@@ -535,6 +564,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no_coverage", action="store_true", help="Hide the coverage track.")
     rna_group = parser.add_argument_group("RNA-seq / sashimi")
     rna_group.add_argument(
+        "--rna_mode", action="store_true",
+        help=("Enable both classified splice-junction arcs and clustered fusion "
+              "evidence from SA tags and distant/inter-chromosomal mates."),
+    )
+    rna_group.add_argument(
         "--sashimi", action="store_true",
         help="Draw count-labelled splice-junction arcs from CIGAR N operations.",
     )
@@ -545,6 +579,48 @@ def build_parser() -> argparse.ArgumentParser:
     rna_group.add_argument(
         "--sashimi_strand", choices=("combined", "split"), default="combined",
         help="Combine strands above the baseline or mirror plus/minus junction arcs.",
+    )
+    rna_group.add_argument(
+        "--min_junction_anchor", type=int, default=0, metavar="BP",
+        help="Require at least BP matched bases on both sides of a splice junction.",
+    )
+    rna_group.add_argument(
+        "--rna_strandness",
+        choices=("alignment", "forward", "reverse", "unstranded"),
+        default="alignment",
+        help=("Infer transcript strand from raw alignment orientation, a forward- or "
+              "reverse-stranded paired library, or ignore strand."),
+    )
+    rna_group.add_argument(
+        "--junction_labels", choices=("count", "status", "full"), default="count",
+        help=("Arc label detail: support count only; annotated/novel status; or "
+              "status plus splice motif when FASTA is available."),
+    )
+    rna_group.add_argument(
+        "--rna_fusions", action="store_true",
+        help=("Show clustered candidate fusion breakpoints using SA split reads and "
+              "distant/inter-chromosomal spanning pairs."),
+    )
+    rna_group.add_argument(
+        "--min_fusion_reads", type=int, default=2, metavar="N",
+        help="Minimum unique split-read/pair names required to draw a fusion candidate.",
+    )
+    rna_group.add_argument(
+        "--fusion_breakpoint_tolerance", type=int, default=10, metavar="BP",
+        help="Cluster fusion breakpoints whose local and partner positions differ by BP.",
+    )
+    rna_group.add_argument(
+        "--fusion_min_distance", type=int, default=100_000, metavar="BP",
+        help="Minimum same-chromosome SA/mate distance considered fusion-like.",
+    )
+    rna_group.add_argument(
+        "--min_fusion_mapq", type=int, default=20, metavar="Q",
+        help="Minimum primary and SA alignment MAPQ for fusion evidence.",
+    )
+    rna_group.add_argument(
+        "--rna_evidence_tsv", metavar="PATH",
+        help=("Export one row per supported junction/fusion candidate. Currently "
+              "available for one BAM and one explicit region."),
     )
     parser.add_argument(
         "--coverage_vaf_threshold", type=float, default=DEFAULT_COVERAGE_VAF_THRESHOLD,
@@ -680,8 +756,11 @@ def main(argv=None) -> int:
         if args.sort_base_position is not None:
             log.error("--sort_base_position cannot be combined with --batch_regions.")
             return 1
-        if args.metrics_tsv or args.metrics_tsv2:
-            log.error("--metrics_tsv/--metrics_tsv2 are not supported with --batch_regions yet.")
+        if args.metrics_tsv or args.metrics_tsv2 or args.rna_evidence_tsv:
+            log.error(
+                "--metrics_tsv/--metrics_tsv2/--rna_evidence_tsv are not "
+                "supported with --batch_regions yet."
+            )
             return 1
     elif args.report:
         log.error("--report requires --batch_regions.")
@@ -695,6 +774,13 @@ def main(argv=None) -> int:
             chrom, start, end = parsed_regions[0]
         else:
             chrom = start = end = None
+        if args.rna_evidence_tsv and (
+            len(bam_paths) != 1 or len(parsed_regions) != 1 or args.mate_view
+        ):
+            raise ValueError(
+                "--rna_evidence_tsv currently requires one --bam, one --region, "
+                "and no --mate_view."
+            )
         highlight_regions = []
         for value in args.highlight or []:
             highlight_chrom, highlight_start, highlight_end = parse_region(
@@ -745,6 +831,18 @@ def main(argv=None) -> int:
     if args.min_junction_reads < 1:
         log.error("--min_junction_reads must be at least one.")
         return 1
+    if args.min_junction_anchor < 0:
+        log.error("--min_junction_anchor cannot be negative.")
+        return 1
+    if args.min_fusion_reads < 1:
+        log.error("--min_fusion_reads must be at least one.")
+        return 1
+    if args.fusion_breakpoint_tolerance < 0 or args.fusion_min_distance < 0:
+        log.error("Fusion breakpoint tolerance and minimum distance cannot be negative.")
+        return 1
+    if args.min_fusion_mapq < 0:
+        log.error("--min_fusion_mapq cannot be negative.")
+        return 1
     if args.max_reference_span < 0:
         log.error("--max_reference_span cannot be negative (use 0 to hide the reference track).")
         return 1
@@ -781,6 +879,36 @@ def main(argv=None) -> int:
     if not 0 <= args.min_mod_probability <= 1:
         log.error("--min_mod_probability must be between 0 and 1.")
         return 1
+    molecule_tag = args.molecule_tag.upper()
+    if molecule_tag not in ("AUTO", "MI", "RX", "UB"):
+        log.error("--molecule_tag must be auto, MI, RX, or UB.")
+        return 1
+    if args.min_family_size < 1:
+        log.error("--min_family_size must be at least one.")
+        return 1
+    if args.molecule_position_tolerance < 0:
+        log.error("--molecule_position_tolerance cannot be negative.")
+        return 1
+    if not 0.5 <= args.molecule_consensus_fraction <= 1:
+        log.error("--molecule_consensus_fraction must be between 0.5 and 1.")
+        return 1
+    if args.molecule_mode and (args.view_as_pairs or args.mate_view or args.long_read_mode):
+        log.error(
+            "--molecule_mode cannot be combined with --view_as_pairs, --mate_view, "
+            "or --long_read_mode."
+        )
+        return 1
+    if args.molecule_mode and (args.base_modifications or args.modification_code):
+        log.error("--molecule_mode cannot currently be combined with base modifications.")
+        return 1
+    if not args.molecule_mode and (
+        molecule_tag != "AUTO"
+        or args.min_family_size != 1
+        or args.molecule_position_tolerance != 2
+        or args.molecule_consensus_fraction != 0.60
+    ):
+        log.error("Molecule-family options require --molecule_mode.")
+        return 1
     if args.long_read_mode and args.view_as_pairs:
         log.error("--long_read_mode cannot be combined with --view_as_pairs.")
         return 1
@@ -789,6 +917,12 @@ def main(argv=None) -> int:
         return 1
     read_tag = args.group_by_tag or args.color_by_tag
     tag_view = "split" if args.group_by_tag else ("color" if args.color_by_tag else "none")
+    if args.molecule_mode and (args.haplotype_view != "none" or tag_view != "none"):
+        log.error(
+            "--molecule_mode cannot currently be combined with haplotype or "
+            "generic BAM-tag colour/group views."
+        )
+        return 1
     if read_tag and args.haplotype_view != "none":
         log.error("Generic BAM-tag colouring/grouping cannot be combined with --haplotype_view.")
         return 1
@@ -916,9 +1050,17 @@ def main(argv=None) -> int:
         cytoband_file=args.cytoband_file,
         max_reference_span=args.max_reference_span,
         show_coverage=not args.no_coverage,
-        show_sashimi=args.sashimi,
+        show_sashimi=args.sashimi or args.rna_mode,
         min_junction_reads=args.min_junction_reads,
         sashimi_strand=args.sashimi_strand,
+        min_junction_anchor=args.min_junction_anchor,
+        rna_strandness=args.rna_strandness,
+        junction_labels=args.junction_labels,
+        show_fusions=args.rna_fusions or args.rna_mode,
+        min_fusion_reads=args.min_fusion_reads,
+        fusion_breakpoint_tolerance=args.fusion_breakpoint_tolerance,
+        fusion_min_distance=args.fusion_min_distance,
+        min_fusion_mapq=args.min_fusion_mapq,
         coverage_vaf_threshold=args.coverage_vaf_threshold,
         min_baseq=args.min_baseq,
         min_variant_mapq=args.min_variant_mapq,
@@ -939,6 +1081,11 @@ def main(argv=None) -> int:
         ),
         modification_codes=args.modification_code,
         min_mod_probability=args.min_mod_probability,
+        molecule_mode=args.molecule_mode,
+        molecule_tag=molecule_tag,
+        min_family_size=args.min_family_size,
+        molecule_position_tolerance=args.molecule_position_tolerance,
+        molecule_consensus_fraction=args.molecule_consensus_fraction,
         annotate_gap=not args.no_annotate,
         show_indel_lengths=args.show_indel_lengths,
         fig_width=args.fig_width,
@@ -952,7 +1099,10 @@ def main(argv=None) -> int:
         only_types=args.only,
         min_softclip=args.min_softclip,
         insert_size_sigma=args.insert_size_sigma,
-        pair_colors=not args.no_pair_colors and not args.long_read_mode,
+        pair_colors=(
+            not args.no_pair_colors and not args.long_read_mode
+            and not args.molecule_mode
+        ),
         shade_by_mapq=not args.no_mapq_shading,
         mapq_cap=args.mapq_cap,
         alignment_colors=alignment_colors,
@@ -1010,9 +1160,10 @@ def main(argv=None) -> int:
                 )
                 continue
             summary_text = []
+            summary_unit = "molecules" if args.molecule_mode else "reads"
             for summary in result.sample_summaries():
                 summary_text.append(
-                    f"{summary.label}: {summary.n_reads} reads, "
+                    f"{summary.label}: {summary.n_reads} {summary_unit}, "
                     f"gapped {summary.pct_gapped:.1f}%, "
                     f"discordant {summary.pct_discordant:.1f}%, "
                     f"soft-clipped {summary.n_softclipped}"
@@ -1104,7 +1255,10 @@ def main(argv=None) -> int:
         **common_kwargs,
     )
     try:
-        summary = snap.snap(metrics_tsv=args.metrics_tsv)
+        summary = snap.snap(
+            metrics_tsv=args.metrics_tsv,
+            rna_evidence_tsv=args.rna_evidence_tsv,
+        )
     except (OSError, ValueError) as exc:
         log.error(str(exc))
         return 1
@@ -1120,8 +1274,10 @@ def main(argv=None) -> int:
             "Selected mate window from %d %s candidate(s): %s:%d-%d",
             mate.candidate_count, mate.source, mate.chrom, mate.start + 1, mate.end,
         )
+    summary_unit = "molecules" if args.molecule_mode else "reads"
     print(
-        f"{summary.n_reads} reads | gapped: {summary.n_gapped} ({summary.pct_gapped:.1f}%) | "
+        f"{summary.n_reads} {summary_unit} | "
+        f"gapped: {summary.n_gapped} ({summary.pct_gapped:.1f}%) | "
         f"max gap: {summary.max_gap}bp | split (SA): {summary.n_with_sa} | "
         f"discordant: {summary.n_discordant} ({summary.pct_discordant:.1f}%) | "
         f"soft-clipped: {summary.n_softclipped}"

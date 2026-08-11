@@ -58,11 +58,27 @@ preferences:
   base_modifications: false
   # modification_code: [5mC, 6mA]
   min_mod_probability: 0.50
+  # Collapse positional MI/RX/UB families before layout, depth, and VAF.
+  molecule_mode: false
+  molecule_tag: auto
+  min_family_size: 1
+  molecule_position_tolerance: 2
+  molecule_consensus_fraction: 0.60
   view_as_pairs: false
   center_guide: false
   sashimi: false
   min_junction_reads: 1
   sashimi_strand: combined
+  # Rich RNA preset: classified junctions plus clustered fusion evidence.
+  rna_mode: false
+  min_junction_anchor: 0
+  rna_strandness: alignment
+  junction_labels: count
+  rna_fusions: false
+  min_fusion_reads: 2
+  fusion_breakpoint_tolerance: 10
+  fusion_min_distance: 100000
+  min_fusion_mapq: 20
   mate_view: false
   mate_window_source: discordant
   annotate_gap: true
@@ -163,6 +179,10 @@ visual_colors:
   sashimi_combined: "#24557f"
   sashimi_plus: "#24557f"
   sashimi_minus: "#8b3f73"
+  junction_annotated: "#24557f"
+  junction_novel: "#e6862d"
+  junction_noncanonical: "#a50f15"
+  fusion_split: "#7a1f5c"
 
 haplotype_colors:
   "1": "#3b6fb6"
@@ -187,6 +207,13 @@ modification_colors:
   5hmC: "#2c7fb8"
   6mA: "#e6862d"
   other: "#555555"
+
+# Molecule mode distinguishes singletons, multi-read consensus families, and
+# duplex families containing evidence from both alignment strands.
+molecule_colors:
+  singleton: "#a8a8a8"
+  consensus: "#4c78a8"
+  duplex: "#a50f15"
 
 cytoband_colors:
   gneg: "#ffffff"
@@ -235,6 +262,8 @@ styles:
   modification_read_marker_size: 9.0
   modification_letter_min_px: 8.0
   modification_letter_size: 4.0
+  molecule_label_min_px: 22.0
+  molecule_label_size: 5.2
   # Wide windows use at most this many mean-depth bins per horizontal pixel.
   coverage_bins_per_pixel: 1.00
   reference_base_alpha: 0.20
@@ -314,3 +343,7 @@ styles:
   sashimi_max_line_width: 4.00
   sashimi_arc_height: 0.78
   sashimi_label_size: 6.00
+  fusion_arc_alpha: 0.88
+  fusion_line_width: 1.10
+  fusion_marker_size: 17.0
+  fusion_label_size: 5.70

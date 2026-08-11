@@ -21,6 +21,7 @@ VARIANTS_DIR = DEMO_DATA_DIR / "variants"
 REFERENCE_PATH = REFERENCE_DIR / "demo_reference.fa"
 CNV_REFERENCE_PATH = REFERENCE_DIR / "demo_cnv_reference.fa"
 LONG_REFERENCE_PATH = REFERENCE_DIR / "demo_long_reference.fa"
+RNA_REFERENCE_PATH = REFERENCE_DIR / "demo_rna_fusion_reference.fa"
 
 CNV_CHROM = "chrCNV"
 CNV_LENGTH = 80_000
@@ -30,6 +31,8 @@ CNV_TUMOUR_PURITY = 0.75
 SEQUENCING_ERROR_RATE = 0.0015
 LONG_CHROM = "chrLong"
 LONG_LENGTH = 12_000
+RNA_CHROMS = ("chrRNA1", "chrRNA2")
+RNA_LENGTH = 5_000
 
 
 @dataclass(frozen=True)
@@ -169,6 +172,74 @@ def write_variant_bam(
     pysam.index(str(path))
 
 
+def write_molecule_bam(path: Path, reference: str) -> None:
+    """Simulate positional UMI families with PCR duplicates and sparse errors."""
+    header = pysam.AlignmentHeader.from_dict({
+        "HD": {"VN": "1.6", "SO": "coordinate"},
+        "SQ": [{"SN": "chrDemo", "LN": len(reference)}],
+        "RG": [{"ID": "UMI", "SM": "UMI_consensus_demo"}],
+    })
+    rng = Random(20_026)
+    variant_position = 118
+    reads = []
+    for family_index in range(26):
+        umi = f"UMI{family_index + 1:04d}"
+        cell = "CELL-A" if family_index < 18 else "CELL-B"
+        family_size = 2 + (family_index * 5) % 6
+        family_start = 48 + (family_index * 7) % 34
+        carries_variant = family_index in {1, 3, 4, 8, 11, 15, 18, 21, 24}
+        for copy_index in range(family_size):
+            start = family_start + (1 if copy_index == family_size - 1 and family_index % 4 == 0 else 0)
+            sequence = list(reference[start:start + 100])
+            if carries_variant:
+                query_position = variant_position - start
+                sequence[query_position] = alternate_base(reference[variant_position])
+            qualities = [38] * len(sequence)
+            add_sequencing_errors(sequence, qualities, rng, 0.0025)
+
+            read = pysam.AlignedSegment(header)
+            read.query_name = f"{umi}_copy_{copy_index + 1:02d}"
+            read.query_sequence = "".join(sequence)
+            reverse = family_index % 5 == 0 and copy_index == family_size - 1
+            read.flag = (16 if reverse else 0) | (1024 if copy_index else 0)
+            read.reference_id = 0
+            read.reference_start = start
+            read.mapping_quality = max(42, min(60, round(rng.gauss(57, 3))))
+            read.cigar = [(0, len(sequence))]
+            read.query_qualities = qualities
+            read.set_tag("RG", "UMI")
+            read.set_tag("RX", umi)
+            read.set_tag("CB", cell)
+            reads.append(read)
+
+    # A few true singleton molecules illustrate optional family-size filtering.
+    for singleton_index in range(3):
+        start = 54 + singleton_index * 9
+        sequence = reference[start:start + 100]
+        read = pysam.AlignedSegment(header)
+        read.query_name = f"singleton_{singleton_index + 1}"
+        read.query_sequence = sequence
+        read.flag = 0
+        read.reference_id = 0
+        read.reference_start = start
+        read.mapping_quality = 55
+        read.cigar = [(0, len(sequence))]
+        read.query_qualities = pysam.qualitystring_to_array("I" * len(sequence))
+        read.set_tag("RG", "UMI")
+        read.set_tag("RX", f"SINGLE{singleton_index + 1}")
+        read.set_tag("CB", "CELL-B")
+        reads.append(read)
+
+    reads.sort(key=lambda read: (read.reference_start, read.query_name))
+    with pysam.AlignmentFile(str(path), "wb", header=header) as bam:
+        for read in reads:
+            bam.write(read)
+    index_path = Path(f"{path}.bai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.index(str(path))
+
+
 def write_insertion_bam(path: Path) -> None:
     """Write close-zoom reads with short CIGAR insertions at one breakpoint."""
     with pysam.FastaFile(str(REFERENCE_PATH)) as fasta:
@@ -264,6 +335,176 @@ def write_long_reference(path: Path) -> str:
         index_path.unlink()
     pysam.faidx(str(path))
     return sequence
+
+
+def write_rna_fusion_reference(path: Path) -> dict[str, str]:
+    """Write two small contigs with canonical splice motifs for RNA examples."""
+    rng = Random(24_003)
+    sequences = {
+        chrom: list(rng.choices("ACGT", weights=(29, 21, 21, 29), k=RNA_LENGTH))
+        for chrom in RNA_CHROMS
+    }
+    # Positive-strand donor/acceptor motifs for GENEA annotated and skipped junctions.
+    for donor in (650, 1050):
+        sequences["chrRNA1"][donor:donor + 2] = list("GT")
+    for acceptor in (900, 1300):
+        sequences["chrRNA1"][acceptor - 2:acceptor] = list("AG")
+    # Negative-strand GT-AG junction: genomic acceptor AC, genomic donor CT.
+    sequences["chrRNA2"][2650:2652] = list("CT")
+    sequences["chrRNA2"][2898:2900] = list("AC")
+    with path.open("w", encoding="utf-8") as handle:
+        for chrom in RNA_CHROMS:
+            sequence = "".join(sequences[chrom])
+            handle.write(f">{chrom}\n")
+            for offset in range(0, len(sequence), 80):
+                handle.write(sequence[offset:offset + 80] + "\n")
+            sequences[chrom] = sequence
+    index_path = Path(f"{path}.fai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.faidx(str(path))
+    return sequences
+
+
+def write_rna_fusion_gtf(path: Path) -> None:
+    genes = (
+        ("chrRNA1", "+", "GENEA", "TXA", ((500, 650), (900, 1050), (1300, 1450))),
+        ("chrRNA2", "-", "GENEB", "TXB", ((2500, 2650), (2900, 3050))),
+    )
+    with path.open("w", encoding="utf-8") as handle:
+        for chrom, strand, gene, transcript, exons in genes:
+            attributes = f'gene_id "{gene}"; gene_name "{gene}";'
+            handle.write(
+                f"{chrom}\tdemo\tgene\t{exons[0][0] + 1}\t{exons[-1][1]}\t.\t"
+                f"{strand}\t.\t{attributes}\n"
+            )
+            transcript_attributes = (
+                attributes + f' transcript_id "{transcript}"; '
+                f'transcript_name "{transcript}";'
+            )
+            handle.write(
+                f"{chrom}\tdemo\ttranscript\t{exons[0][0] + 1}\t{exons[-1][1]}\t.\t"
+                f"{strand}\t.\t{transcript_attributes}\n"
+            )
+            for exon_index, (start, end) in enumerate(exons, 1):
+                exon_attributes = transcript_attributes + f' exon_number "{exon_index}";'
+                handle.write(
+                    f"{chrom}\tdemo\texon\t{start + 1}\t{end}\t.\t{strand}\t.\t"
+                    f"{exon_attributes}\n"
+                )
+
+
+def write_rna_fusion_bam(path: Path, references: dict[str, str]) -> None:
+    """Simulate ordinary junctions, exon skipping, and reciprocal fusion evidence."""
+    header = pysam.AlignmentHeader.from_dict({
+        "HD": {"VN": "1.6", "SO": "coordinate"},
+        "SQ": [{"SN": chrom, "LN": len(references[chrom])} for chrom in RNA_CHROMS],
+        "RG": [{"ID": "RNA", "SM": "RNA_fusion_demo", "PL": "ILLUMINA"}],
+    })
+    reads = []
+
+    def add_spliced(chrom, name, left_start, donor, acceptor, count, reverse=False):
+        left_length = donor - left_start
+        right_length = 50
+        intron = acceptor - donor
+        for index in range(count):
+            jitter = index % 3
+            start = left_start - jitter
+            adjusted_left = left_length + jitter
+            sequence = (
+                references[chrom][start:donor]
+                + references[chrom][acceptor:acceptor + right_length]
+            )
+            read = pysam.AlignedSegment(header)
+            read.query_name = f"{name}_{index + 1:03d}"
+            read.query_sequence = sequence
+            read.flag = 16 if reverse else 0
+            read.reference_id = RNA_CHROMS.index(chrom)
+            read.reference_start = start
+            read.mapping_quality = 60
+            read.cigar = [(0, adjusted_left), (3, intron), (0, right_length)]
+            read.query_qualities = pysam.qualitystring_to_array("I" * len(sequence))
+            read.set_tag("RG", "RNA")
+            reads.append(read)
+
+    add_spliced("chrRNA1", "GENEA_junction_1", 600, 650, 900, 24)
+    add_spliced("chrRNA1", "GENEA_junction_2", 1000, 1050, 1300, 18)
+    add_spliced("chrRNA1", "GENEA_exon_skip", 600, 650, 1300, 7)
+    add_spliced("chrRNA2", "GENEB_junction", 2600, 2650, 2900, 20, reverse=True)
+
+    # Reciprocal SA records for ten split reads at the GENEA--GENEB breakpoint.
+    for index in range(10):
+        jitter = index % 3
+        first_start = 1300 + jitter
+        second_start = 2500 + jitter
+        first_sequence = references["chrRNA1"][first_start:first_start + 50]
+        second_sequence = references["chrRNA2"][second_start:second_start + 50]
+        query_sequence = first_sequence + second_sequence
+        query_name = f"GENEA_GENEB_split_{index + 1:02d}"
+
+        primary = pysam.AlignedSegment(header)
+        primary.query_name = query_name
+        primary.query_sequence = query_sequence
+        primary.flag = 0
+        primary.reference_id = 0
+        primary.reference_start = first_start
+        primary.mapping_quality = 60
+        primary.cigar = [(0, 50), (4, 50)]
+        primary.query_qualities = pysam.qualitystring_to_array("I" * 100)
+        primary.set_tag("SA", f"chrRNA2,{second_start + 1},+,50S50M,58,1;")
+        primary.set_tag("RG", "RNA")
+        reads.append(primary)
+
+        supplementary = pysam.AlignedSegment(header)
+        supplementary.query_name = query_name
+        supplementary.query_sequence = query_sequence
+        supplementary.flag = 2048
+        supplementary.reference_id = 1
+        supplementary.reference_start = second_start
+        supplementary.mapping_quality = 58
+        supplementary.cigar = [(4, 50), (0, 50)]
+        supplementary.query_qualities = pysam.qualitystring_to_array("I" * 100)
+        supplementary.set_tag("SA", f"chrRNA1,{first_start + 1},+,50M50S,60,1;")
+        supplementary.set_tag("RG", "RNA")
+        reads.append(supplementary)
+
+    # Six paired fragments span the fusion without crossing it in either read.
+    for index in range(6):
+        first_start = 1250
+        second_start = 2500
+        query_name = f"GENEA_GENEB_pair_{index + 1:02d}"
+        for read_side, chrom_index, start, mate_index, mate_start, reverse in (
+            (1, 0, first_start, 1, second_start, False),
+            (2, 1, second_start, 0, first_start, True),
+        ):
+            sequence = references[RNA_CHROMS[chrom_index]][start:start + 100]
+            read = pysam.AlignedSegment(header)
+            read.query_name = query_name
+            read.query_sequence = sequence
+            read.flag = (
+                1 | (64 if read_side == 1 else 128)
+                | (16 if reverse else 0)
+                | (32 if read_side == 1 else 0)
+            )
+            read.reference_id = chrom_index
+            read.reference_start = start
+            read.mapping_quality = 55
+            read.cigar = [(0, 100)]
+            read.next_reference_id = mate_index
+            read.next_reference_start = mate_start
+            read.template_length = 0
+            read.query_qualities = pysam.qualitystring_to_array("I" * 100)
+            read.set_tag("RG", "RNA")
+            reads.append(read)
+
+    reads.sort(key=lambda read: (read.reference_id, read.reference_start, read.query_name))
+    with pysam.AlignmentFile(str(path), "wb", header=header) as bam:
+        for read in reads:
+            bam.write(read)
+    index_path = Path(f"{path}.bai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.index(str(path))
 
 
 def encode_modification_deltas(sequence: str, canonical_base: str, selected) -> list[int]:
@@ -1070,6 +1311,11 @@ def main() -> None:
     }
     small_reference = write_small_reference(REFERENCE_PATH)
     long_reference = write_long_reference(LONG_REFERENCE_PATH)
+    rna_references = write_rna_fusion_reference(RNA_REFERENCE_PATH)
+    write_rna_fusion_gtf(ANNOTATIONS_DIR / "demo_rna_fusion.gtf")
+    write_rna_fusion_bam(
+        ALIGNMENTS_DIR / "demo_rna_fusion.bam", rna_references
+    )
     write_long_read_bam(
         ALIGNMENTS_DIR / "demo_long_reads.bam", long_reference
     )
@@ -1097,6 +1343,9 @@ def main() -> None:
         ALIGNMENTS_DIR / "demo_tagged_reads.bam", "Tumour", 210,
         tumour_profile, seed=9_701,
         read_groups=("Library_A", "Library_B", "Library_C"),
+    )
+    write_molecule_bam(
+        ALIGNMENTS_DIR / "demo_molecule_reads.bam", small_reference
     )
     write_insertion_bam(ALIGNMENTS_DIR / "demo_insertions.bam")
     cnv_reference = write_cnv_reference(CNV_REFERENCE_PATH)

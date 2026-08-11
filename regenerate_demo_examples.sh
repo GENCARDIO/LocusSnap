@@ -66,6 +66,29 @@ python3 -m locus_snap \
   --dpi 140
 
 python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_molecule_reads.bam \
+  --sample_label 'UMI-aware consensus · PCR families count once' \
+  --fasta out/demo_data/reference/demo_reference.fa \
+  --region chrDemo:81-180 \
+  --config out/demo_data/config/demo_molecule.yaml \
+  --molecule_mode \
+  --molecule_tag RX \
+  --min_family_size 2 \
+  --molecule_position_tolerance 2 \
+  --molecule_consensus_fraction 0.60 \
+  --display_mode expand \
+  --layout pack \
+  --sort_by start \
+  --max_alignment_depth 0 \
+  --coverage_vaf_threshold 0.20 \
+  --genome none \
+  --refseq none \
+  --output_dir out \
+  --output_name 40_molecule_consensus \
+  --fig_width 14 \
+  --dpi 150
+
+python3 -m locus_snap \
   --bam out/demo_data/alignments/demo_cnv_tumour.bam \
   --sample_label 'Tumour · 75% purity · 16,000 reads · CN1 loss and CN3 gain' \
   --fasta out/demo_data/reference/demo_cnv_reference.fa \
@@ -139,6 +162,39 @@ python3 -m locus_snap \
   --output_name 24_rnaseq_sashimi \
   --fig_width 14 \
   --dpi 140
+
+python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_rna_fusion.bam \
+  --sample_label 'RNA-seq · annotated and novel junctions · GENEA–GENEB fusion' \
+  --fasta out/demo_data/reference/demo_rna_fusion_reference.fa \
+  --region chrRNA1:451-1550 \
+  --region chrRNA2:2401-3150 \
+  --region_label 'GENEA splice and fusion breakpoint' \
+  --region_label 'GENEB reciprocal fusion breakpoint' \
+  --custom_track 'out/demo_data/annotations/demo_rna_fusion.gtf,gtf,Fusion partner transcripts,#17217a,collapse,0.58' \
+  --rna_mode \
+  --min_junction_reads 3 \
+  --min_junction_anchor 12 \
+  --sashimi_strand split \
+  --rna_strandness forward \
+  --junction_labels full \
+  --min_fusion_reads 3 \
+  --fusion_breakpoint_tolerance 10 \
+  --fusion_min_distance 500 \
+  --min_fusion_mapq 20 \
+  --display_mode squish \
+  --layout pack \
+  --sort_by start \
+  --max_rows 48 \
+  --max_alignment_depth 0 \
+  --no_pair_colors \
+  --no_ideogram \
+  --genome none \
+  --refseq none \
+  --output_dir out \
+  --output_name 41_rnaseq_junction_fusion \
+  --fig_width 16 \
+  --dpi 150
 
 python3 -m locus_snap \
   --bam test/test.bam \

@@ -19,8 +19,10 @@ from locus_snap.downsample import DEFAULT_MAX_ALIGNMENT_DEPTH, downsample_reads
 from locus_snap.layout import build_rows, infer_reference_base, truncate_rows
 from locus_snap.mate_window import MateWindow, choose_mate_window, supporting_query_names
 from locus_snap.metrics import RegionSummary, format_summary_table, summarize, write_tsv
+from locus_snap.molecule import MoleculeBuildResult, build_molecule_consensus_reads
 from locus_snap.read_model import AlignedRead, fetch_reads, matches_only, open_alignment_file
 from locus_snap.reference import ReferenceWindow
+from locus_snap.rna import write_rna_evidence_tsv
 from locus_snap.track_plugin import PluginTrackSource
 from locus_snap.render import (
     AlignmentRenderer,
@@ -114,6 +116,14 @@ class BamSnapshot:
         show_sashimi: bool = False,
         min_junction_reads: int = 1,
         sashimi_strand: str = "combined",
+        min_junction_anchor: int = 0,
+        rna_strandness: str = "alignment",
+        junction_labels: str = "count",
+        show_fusions: bool = False,
+        min_fusion_reads: int = 2,
+        fusion_breakpoint_tolerance: int = 10,
+        fusion_min_distance: int = 100_000,
+        min_fusion_mapq: int = 20,
         genome: str = "auto",
         cytoband_file: Optional[str] = None,
         max_reference_span: int = DEFAULT_MAX_REFERENCE_SPAN,
@@ -142,6 +152,11 @@ class BamSnapshot:
         show_base_modifications: bool = False,
         modification_codes: Optional[List[str]] = None,
         min_mod_probability: float = 0.5,
+        molecule_mode: bool = False,
+        molecule_tag: str = "auto",
+        min_family_size: int = 1,
+        molecule_position_tolerance: int = 2,
+        molecule_consensus_fraction: float = 0.60,
     ):
         self.bam = bam
         self.chrom = chrom
@@ -193,6 +208,14 @@ class BamSnapshot:
         self.show_sashimi = show_sashimi
         self.min_junction_reads = min_junction_reads
         self.sashimi_strand = sashimi_strand
+        self.min_junction_anchor = min_junction_anchor
+        self.rna_strandness = rna_strandness
+        self.junction_labels = junction_labels
+        self.show_fusions = show_fusions
+        self.min_fusion_reads = min_fusion_reads
+        self.fusion_breakpoint_tolerance = fusion_breakpoint_tolerance
+        self.fusion_min_distance = fusion_min_distance
+        self.min_fusion_mapq = min_fusion_mapq
         self.genome = genome
         self.cytoband_file = cytoband_file
         self.max_reference_span = max_reference_span
@@ -215,6 +238,19 @@ class BamSnapshot:
         self.show_base_modifications = show_base_modifications
         self.modification_codes = list(modification_codes or [])
         self.min_mod_probability = min_mod_probability
+        self.molecule_mode = molecule_mode
+        self.molecule_tag = molecule_tag
+        self.min_family_size = min_family_size
+        self.molecule_position_tolerance = molecule_position_tolerance
+        self.molecule_consensus_fraction = molecule_consensus_fraction
+        if molecule_mode and (
+            view_as_pairs or mate_view or long_read_mode or show_base_modifications
+            or haplotype_view != "none" or tag_view != "none"
+        ):
+            raise ValueError(
+                "Molecule mode cannot be combined with paired, mate-window, long-read, "
+                "base-modification, haplotype, or generic tag-view mode."
+            )
 
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -237,6 +273,7 @@ class BamSnapshot:
         self.cytobands: Dict[str, List[Cytoband]] = {}
         self.cytoband_label: Optional[str] = None
         self.reads_loaded = False
+        self.molecule_result: Optional[MoleculeBuildResult] = None
 
     def load_reads(self) -> List[AlignedRead]:
         with open_alignment_file(self.bam, reference=self.fasta) as bam_file:
@@ -252,7 +289,7 @@ class BamSnapshot:
             min_mapq=self.min_mapq,
             include_secondary=self.include_secondary,
             include_supplementary=self.include_supplementary,
-            include_duplicates=self.include_duplicates,
+            include_duplicates=self.include_duplicates or self.molecule_mode,
             insert_size_sigma=self.insert_size_sigma,
             only_types=None,
             min_softclip=self.min_softclip,
@@ -263,15 +300,28 @@ class BamSnapshot:
             tag_filter=self.tag_filter,
             parse_base_modifications=self.show_base_modifications,
         )
+        working_reads = self.source_reads
+        if self.molecule_mode:
+            self.molecule_result = build_molecule_consensus_reads(
+                self.source_reads, requested_tag=self.molecule_tag,
+                minimum_family_size=self.min_family_size,
+                position_tolerance=self.molecule_position_tolerance,
+                minimum_consensus_fraction=self.molecule_consensus_fraction,
+                reference=reference,
+            )
+            working_reads = self.molecule_result.reads
         self.reads = []
-        for read in self.source_reads:
+        for read in working_reads:
             if matches_only(read, self.only_types, self.min_softclip):
                 self.reads.append(read)
         self.reference_window = reference
         self.reads_loaded = True
         return self.reads
 
-    def snap(self, metrics_tsv: Optional[str] = None) -> RegionSummary:
+    def snap(
+        self, metrics_tsv: Optional[str] = None,
+        rna_evidence_tsv: Optional[str] = None,
+    ) -> RegionSummary:
         reads = self.load_reads() if not self.reads_loaded else self.reads
         base_position = self.sort_base_position
         if self.sort_by == "base" and base_position is None:
@@ -294,6 +344,22 @@ class BamSnapshot:
         genomic_tracks = []
         for source in self.annotation_sources:
             genomic_tracks.append(source.fetch(self.chrom, self.start, self.end))
+        if rna_evidence_tsv:
+            write_rna_evidence_tsv(
+                rna_evidence_tsv, reads, self.chrom,
+                reference=self.reference_window, genomic_tracks=genomic_tracks,
+                strand_mode=self.sashimi_strand,
+                strandness=self.rna_strandness,
+                minimum_junction_reads=self.min_junction_reads,
+                minimum_anchor=self.min_junction_anchor,
+                # An explicit evidence export is analytical output, so include
+                # fusion candidates even when their visual track is hidden.
+                include_fusions=True,
+                minimum_fusion_reads=self.min_fusion_reads,
+                fusion_breakpoint_tolerance=self.fusion_breakpoint_tolerance,
+                fusion_minimum_distance=self.fusion_min_distance,
+                minimum_fusion_mapq=self.min_fusion_mapq,
+            )
         display_reads, self.downsampled_reads = downsample_reads(
             reads, max_depth=self.max_alignment_depth,
             priority_names=base_priority_names,
@@ -342,10 +408,19 @@ class BamSnapshot:
             show_sashimi=self.show_sashimi,
             min_junction_reads=self.min_junction_reads,
             sashimi_strand=self.sashimi_strand,
+            min_junction_anchor=self.min_junction_anchor,
+            rna_strandness=self.rna_strandness,
+            junction_labels=self.junction_labels,
+            show_fusions=self.show_fusions,
+            min_fusion_reads=self.min_fusion_reads,
+            fusion_breakpoint_tolerance=self.fusion_breakpoint_tolerance,
+            fusion_min_distance=self.fusion_min_distance,
+            min_fusion_mapq=self.min_fusion_mapq,
             long_read_mode=self.long_read_mode,
             show_base_modifications=self.show_base_modifications,
             modification_codes=self.modification_codes,
             min_mod_probability=self.min_mod_probability,
+            molecule_mode=self.molecule_mode,
         )
         sort_label = self.sort_by
         if self.sort_by == "base":
@@ -354,12 +429,19 @@ class BamSnapshot:
                 sort_label += f" ref={reference_base}"
         title = self.label
         if self.show_alignments:
+            molecule_label = (
+                f", molecule={self.molecule_result.tag}"
+                if self.molecule_result else ""
+            )
             title = (
-                f"{self.label} -- {len(reads)} reads, display={self.display_mode}, layout={self.layout}, "
+                f"{self.label} -- {len(reads)} "
+                f"{'molecules' if self.molecule_mode else 'reads'}, "
+                f"display={self.display_mode}, layout={self.layout}, "
                 f"view={'pairs' if self.view_as_pairs else 'alignments'}, "
                 f"haplotypes={self.haplotype_view}, "
                 f"tag={self.read_tag + ':' + self.tag_view if self.read_tag else 'none'}, "
                 f"sort_by={sort_label} ({'desc' if self.descending else 'asc'})"
+                f"{molecule_label}"
             )
         if self.mate_view:
             self.mate_window = choose_mate_window(
@@ -547,6 +629,14 @@ def render_multi_locus_snapshots(
     show_sashimi: bool = False,
     min_junction_reads: int = 1,
     sashimi_strand: str = "combined",
+    min_junction_anchor: int = 0,
+    rna_strandness: str = "alignment",
+    junction_labels: str = "count",
+    show_fusions: bool = False,
+    min_fusion_reads: int = 2,
+    fusion_breakpoint_tolerance: int = 10,
+    fusion_min_distance: int = 100_000,
+    min_fusion_mapq: int = 20,
     genome: str = "auto",
     cytoband_file: Optional[str] = None,
     max_reference_span: int = DEFAULT_MAX_REFERENCE_SPAN,
@@ -577,12 +667,25 @@ def render_multi_locus_snapshots(
     show_base_modifications: bool = False,
     modification_codes: Optional[List[str]] = None,
     min_mod_probability: float = 0.5,
+    molecule_mode: bool = False,
+    molecule_tag: str = "auto",
+    min_family_size: int = 1,
+    molecule_position_tolerance: int = 2,
+    molecule_consensus_fraction: float = 0.60,
 ) -> tuple[str, str]:
     """Render two or more explicit loci as columns for one or more BAMs."""
     if len(regions) < 2:
         raise ValueError("Explicit multi-locus view requires at least two regions.")
     if not bam_paths:
         raise ValueError("Explicit multi-locus view requires at least one BAM.")
+    if molecule_mode and (
+        view_as_pairs or long_read_mode or show_base_modifications
+        or haplotype_view != "none" or tag_view != "none"
+    ):
+        raise ValueError(
+            "Molecule mode cannot be combined with paired, long-read, "
+            "base-modification, haplotype, or generic tag-view mode."
+        )
     os.makedirs(output_dir, exist_ok=True)
 
     labels = list(sample_labels or [])
@@ -646,13 +749,23 @@ def render_multi_locus_snapshots(
                 bam_path, chrom, start, end, reference=reference,
                 min_mapq=min_mapq, include_secondary=include_secondary,
                 include_supplementary=include_supplementary,
-                include_duplicates=include_duplicates,
+                include_duplicates=include_duplicates or molecule_mode,
                 insert_size_sigma=insert_size_sigma, only_types=only_types,
                 min_softclip=min_softclip, haplotype_tag=haplotype_tag,
                 phase_set_tag=phase_set_tag, haplotype_filter=haplotype_filter,
                 read_tag=read_tag, tag_filter=tag_filter,
                 parse_base_modifications=show_base_modifications,
             )
+            molecule_result = None
+            if molecule_mode:
+                molecule_result = build_molecule_consensus_reads(
+                    reads, requested_tag=molecule_tag,
+                    minimum_family_size=min_family_size,
+                    position_tolerance=molecule_position_tolerance,
+                    minimum_consensus_fraction=molecule_consensus_fraction,
+                    reference=reference,
+                )
+                reads = molecule_result.reads
             sample_reference_base = reference_base
             if sort_by == "base" and sample_reference_base not in ("A", "C", "G", "T"):
                 sample_reference_base = infer_reference_base(reads, base_position)
@@ -689,6 +802,9 @@ def render_multi_locus_snapshots(
                 )
             samples.append({
                 "label": (
+                    f"{sample_label} (n={len(reads)} molecules, "
+                    f"gapped={summary.n_gapped}, max_gap={summary.max_gap}bp)"
+                    if molecule_mode else
                     f"{sample_label} (n={len(reads)}, gapped={summary.n_gapped}, "
                     f"max_gap={summary.max_gap}bp)"
                 ),
@@ -739,16 +855,23 @@ def render_multi_locus_snapshots(
         sort_base_position=None, sort_reference_base=None,
         show_center_guide=show_center_guide, show_sashimi=show_sashimi,
         min_junction_reads=min_junction_reads, sashimi_strand=sashimi_strand,
+        min_junction_anchor=min_junction_anchor,
+        rna_strandness=rna_strandness, junction_labels=junction_labels,
+        show_fusions=show_fusions, min_fusion_reads=min_fusion_reads,
+        fusion_breakpoint_tolerance=fusion_breakpoint_tolerance,
+        fusion_min_distance=fusion_min_distance, min_fusion_mapq=min_fusion_mapq,
         long_read_mode=long_read_mode,
         show_base_modifications=show_base_modifications,
         modification_codes=modification_codes,
         min_mod_probability=min_mod_probability,
+        molecule_mode=molecule_mode,
     )
     renderer.render_multi_loci(
         loci=loci, out_path=out_path,
         suptitle=(
             f"{len(regions)}-locus view · display={display_mode}, layout={layout}, "
             f"view={'pairs' if view_as_pairs else 'alignments'}, "
+            f"{'unit=molecules, ' if molecule_mode else ''}"
             f"tag={read_tag + ':' + tag_view if read_tag else 'none'}, "
             f"sort_by={sort_by} ({'desc' if descending else 'asc'})"
         ),
@@ -803,6 +926,14 @@ def compare_snapshots(
     show_sashimi: bool = False,
     min_junction_reads: int = 1,
     sashimi_strand: str = "combined",
+    min_junction_anchor: int = 0,
+    rna_strandness: str = "alignment",
+    junction_labels: str = "count",
+    show_fusions: bool = False,
+    min_fusion_reads: int = 2,
+    fusion_breakpoint_tolerance: int = 10,
+    fusion_min_distance: int = 100_000,
+    min_fusion_mapq: int = 20,
     genome: str = "auto",
     cytoband_file: Optional[str] = None,
     max_reference_span: int = DEFAULT_MAX_REFERENCE_SPAN,
@@ -835,12 +966,25 @@ def compare_snapshots(
     show_base_modifications: bool = False,
     modification_codes: Optional[List[str]] = None,
     min_mod_probability: float = 0.5,
+    molecule_mode: bool = False,
+    molecule_tag: str = "auto",
+    min_family_size: int = 1,
+    molecule_position_tolerance: int = 2,
+    molecule_consensus_fraction: float = 0.60,
 ) -> tuple[str, str]:
     """Render two or more BAMs as sample panels sharing one genomic x-axis.
 
     ``result_summaries`` is an optional mutable sink used by batch reports.
     The established two-value return shape stays unchanged for API callers.
     """
+    if molecule_mode and (
+        view_as_pairs or long_read_mode or show_base_modifications
+        or haplotype_view != "none" or tag_view != "none"
+    ):
+        raise ValueError(
+            "Molecule mode cannot be combined with paired, long-read, "
+            "base-modification, haplotype, or generic tag-view mode."
+        )
     os.makedirs(output_dir, exist_ok=True)
     bam_paths = [bam1, bam2]
     bam_paths.extend(additional_bams or [])
@@ -888,13 +1032,24 @@ def compare_snapshots(
         reads = fetch_reads(
             bam_path, chrom, start, end, reference=reference, min_mapq=min_mapq,
             include_secondary=include_secondary, include_supplementary=include_supplementary,
-            include_duplicates=include_duplicates, insert_size_sigma=insert_size_sigma,
+            include_duplicates=include_duplicates or molecule_mode,
+            insert_size_sigma=insert_size_sigma,
             only_types=only_types, min_softclip=min_softclip,
             haplotype_tag=haplotype_tag, phase_set_tag=phase_set_tag,
             haplotype_filter=haplotype_filter,
             read_tag=read_tag, tag_filter=tag_filter,
             parse_base_modifications=show_base_modifications,
         )
+        molecule_result = None
+        if molecule_mode:
+            molecule_result = build_molecule_consensus_reads(
+                reads, requested_tag=molecule_tag,
+                minimum_family_size=min_family_size,
+                position_tolerance=molecule_position_tolerance,
+                minimum_consensus_fraction=molecule_consensus_fraction,
+                reference=reference,
+            )
+            reads = molecule_result.reads
         if sort_by == "base" and reference_base not in ("A", "C", "G", "T"):
             reference_base = infer_reference_base(reads, base_position)
         base_priority_names = set()
@@ -935,7 +1090,13 @@ def compare_snapshots(
             )
             companion_tracks.append(companion_source.fetch(chrom, start, end))
         panels.append({
-            "label": f"{label}  (n={len(reads)}, gapped={summary.n_gapped}, max_gap={summary.max_gap}bp)",
+            "label": (
+                f"{label}  (n={len(reads)} molecules, "
+                f"gapped={summary.n_gapped}, max_gap={summary.max_gap}bp)"
+                if molecule_mode else
+                f"{label}  (n={len(reads)}, gapped={summary.n_gapped}, "
+                f"max_gap={summary.max_gap}bp)"
+            ),
             "rows": rows,
             "all_reads_for_coverage": reads,
             "layout": layout,
@@ -978,10 +1139,19 @@ def compare_snapshots(
         show_sashimi=show_sashimi,
         min_junction_reads=min_junction_reads,
         sashimi_strand=sashimi_strand,
+        min_junction_anchor=min_junction_anchor,
+        rna_strandness=rna_strandness,
+        junction_labels=junction_labels,
+        show_fusions=show_fusions,
+        min_fusion_reads=min_fusion_reads,
+        fusion_breakpoint_tolerance=fusion_breakpoint_tolerance,
+        fusion_min_distance=fusion_min_distance,
+        min_fusion_mapq=min_fusion_mapq,
         long_read_mode=long_read_mode,
         show_base_modifications=show_base_modifications,
         modification_codes=modification_codes,
         min_mod_probability=min_mod_probability,
+        molecule_mode=molecule_mode,
     )
     renderer.render_multi(
         panels=panels, chrom=chrom, window_start=start, window_end=end,
@@ -989,6 +1159,7 @@ def compare_snapshots(
         suptitle=(
             f"display={display_mode}, layout={layout}, "
             f"view={'pairs' if view_as_pairs else 'alignments'}, "
+            f"{'unit=molecules, ' if molecule_mode else ''}"
             f"haplotypes={haplotype_view}, "
             f"tag={read_tag + ':' + tag_view if read_tag else 'none'}, "
             f"sort_by={sort_by}"

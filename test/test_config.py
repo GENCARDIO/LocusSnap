@@ -205,6 +205,11 @@ def test_yaml_preferences_become_defaults_but_cli_still_wins():
         "highlight_color": "#abcdef",
         "highlight_alpha": 0.3,
         "title_align": "center",
+        "molecule_mode": True,
+        "molecule_tag": "RX",
+        "min_family_size": 3,
+        "molecule_position_tolerance": 4,
+        "molecule_consensus_fraction": 0.7,
         "show_coverage": False,
         "show_indel_lengths": True,
         "include_supplementary": False,
@@ -229,12 +234,32 @@ def test_yaml_preferences_become_defaults_but_cli_still_wins():
     assert configured.highlight_color == "#abcdef"
     assert configured.highlight_alpha == pytest.approx(0.3)
     assert configured.title_align == "center"
+    assert configured.molecule_mode
+    assert configured.molecule_tag == "RX"
+    assert configured.min_family_size == 3
+    assert configured.molecule_position_tolerance == 4
+    assert configured.molecule_consensus_fraction == pytest.approx(0.7)
     assert configured.no_coverage
     assert configured.show_indel_lengths
     assert configured.exclude_supplementary
     assert configured.output_format == "svg"
     assert overridden.display_mode == "expand"
     assert overridden.max_alignment_depth == 80
+
+
+def test_molecule_colours_are_configurable_but_fixed_to_known_roles(tmp_path):
+    config = tmp_path / "molecules.yaml"
+    config.write_text(
+        "molecule_colors:\n  consensus: '#123456'\n", encoding="utf-8"
+    )
+    theme = load_config(str(config))
+    assert theme["molecule_colors"]["consensus"] == "#123456"
+
+    config.write_text(
+        "molecule_colors:\n  typo: '#123456'\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="molecule_colors key"):
+        load_config(str(config))
 
 
 def test_refseq_defaults_to_auto_and_can_be_disabled_from_yaml():
@@ -285,6 +310,28 @@ def test_parser_accepts_repeated_regions_labels_and_breakpoint_links():
     assert args.region == ["chr3:100-200", "chr8:300-450"]
     assert args.region_label == ["Left breakpoint", "Right breakpoint"]
     assert args.link_breakpoints
+
+
+def test_parser_accepts_rich_rna_junction_and_fusion_options():
+    parser = build_parser()
+    args = parser.parse_args([
+        "--bam", "rna.bam", "--region", "chr1:1-1000",
+        "--rna_mode", "--min_junction_anchor", "12",
+        "--rna_strandness", "reverse", "--junction_labels", "full",
+        "--min_fusion_reads", "4", "--fusion_breakpoint_tolerance", "15",
+        "--fusion_min_distance", "50000", "--min_fusion_mapq", "30",
+        "--rna_evidence_tsv", "events.tsv",
+    ])
+
+    assert args.rna_mode
+    assert args.min_junction_anchor == 12
+    assert args.rna_strandness == "reverse"
+    assert args.junction_labels == "full"
+    assert args.min_fusion_reads == 4
+    assert args.fusion_breakpoint_tolerance == 15
+    assert args.fusion_min_distance == 50_000
+    assert args.min_fusion_mapq == 30
+    assert args.rna_evidence_tsv == "events.tsv"
 
 
 @pytest.mark.parametrize(

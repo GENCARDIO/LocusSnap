@@ -1,5 +1,6 @@
 from random import Random
 
+import pysam
 import pytest
 
 from generate_demo_data import (
@@ -8,6 +9,8 @@ from generate_demo_data import (
     CNV_TUMOUR_PURITY,
     add_sequencing_errors,
     build_cnv_variant_sites,
+    write_rna_fusion_bam,
+    write_rna_fusion_reference,
 )
 
 
@@ -52,3 +55,18 @@ def test_error_model_changes_bases_and_marks_them_low_quality():
     assert "".join(sequence) != "ACGTACGT"
     assert all(observed != expected for observed, expected in zip(sequence, "ACGTACGT"))
     assert qualities == [12] * len(sequence)
+
+
+def test_rna_demo_contains_junction_split_and_spanning_fusion_evidence(tmp_path):
+    reference_path = tmp_path / "rna.fa"
+    bam_path = tmp_path / "rna.bam"
+    references = write_rna_fusion_reference(reference_path)
+    write_rna_fusion_bam(bam_path, references)
+
+    with pysam.AlignmentFile(str(bam_path), "rb") as bam:
+        reads = list(bam.fetch(until_eof=True))
+
+    assert len(reads) == 101
+    assert sum(any(op == 3 for op, _ in read.cigartuples or []) for read in reads) == 69
+    assert sum(read.has_tag("SA") for read in reads) == 20
+    assert sum(read.is_paired for read in reads) == 12

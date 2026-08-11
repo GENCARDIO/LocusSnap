@@ -48,6 +48,7 @@ class BatchResult:
     summary: Optional[RegionSummary] = None
     summaries: Optional[List[RegionSummary]] = None
     error: Optional[str] = None
+    unit: str = "reads"
 
     def sample_summaries(self) -> List[RegionSummary]:
         """Return ordered sample summaries while accepting legacy results."""
@@ -196,7 +197,7 @@ def _delta(value: float, baseline: float, suffix: str = "") -> str:
 
 
 def _sample_metrics_table(
-    summaries: List[RegionSummary], sample_labels: List[str]
+    summaries: List[RegionSummary], sample_labels: List[str], unit: str = "reads",
 ) -> str:
     if not summaries:
         return ""
@@ -225,8 +226,8 @@ def _sample_metrics_table(
         )
     return (
         "<div class='table-scroll'><table class='sample-metrics'>"
-        "<thead><tr><th>Sample</th><th>Reads</th><th>Gapped</th>"
-        "<th>Discordant</th><th>Soft-clipped</th><th>&Delta; reads</th>"
+        f"<thead><tr><th>Sample</th><th>{html.escape(unit.title())}</th><th>Gapped</th>"
+        f"<th>Discordant</th><th>Soft-clipped</th><th>&Delta; {html.escape(unit)}</th>"
         "<th>&Delta; gapped</th><th>&Delta; discordant</th>"
         "<th>&Delta; soft-clipped</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></div>"
@@ -252,6 +253,8 @@ def write_html_report(
     mime_type = MIME_TYPES[selected_format]
     labels = _report_sample_labels(results, sample_labels)
     multi_sample = len(labels) > 1
+    unit = "molecules" if any(result.unit == "molecules" for result in results) else "reads"
+    unit_title = html.escape(unit.title())
 
     if multi_sample:
         grouped_headers = "".join(
@@ -259,7 +262,7 @@ def write_html_report(
             for label in labels
         )
         metric_headers = "".join(
-            "<th>Reads</th><th>Gapped</th><th>Discordant</th><th>Soft-clipped</th>"
+            f"<th>{unit_title}</th><th>Gapped</th><th>Discordant</th><th>Soft-clipped</th>"
             for _ in labels
         )
         index_header = (
@@ -268,7 +271,7 @@ def write_html_report(
         )
     else:
         index_header = (
-            "<tr><th>Name</th><th>Region</th><th>Reads</th><th>Gapped</th>"
+            f"<tr><th>Name</th><th>Region</th><th>{unit_title}</th><th>Gapped</th>"
             "<th>Discordant</th><th>Soft-clipped</th></tr>"
         )
 
@@ -309,11 +312,12 @@ def write_html_report(
         )
         with open(result.output_path, "rb") as image_file:
             encoded = base64.b64encode(image_file.read()).decode("ascii")
-        metrics = _sample_metrics_table(summaries, labels) if multi_sample else ""
+        metrics = _sample_metrics_table(summaries, labels, unit) if multi_sample else ""
         if summaries:
             reads, gapped, discordant, softclipped = _summary_cells(summaries[0])
             single_summary = (
-                f" &middot; {reads} reads, {gapped} gapped, {discordant} discordant, "
+                f" &middot; {reads} {html.escape(unit)}, {gapped} gapped, "
+                f"{discordant} discordant, "
                 f"{softclipped} soft-clipped"
             ) if not multi_sample else ""
         else:
