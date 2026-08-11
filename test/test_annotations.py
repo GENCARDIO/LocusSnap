@@ -129,14 +129,15 @@ def test_bed12_builds_thick_coding_blocks_and_thin_utrs(tmp_path):
     assert item.blocks == [(120, 150), (200, 230)]
     assert item.utrs == [(100, 120), (230, 260)]
     assert item.strand == "+"
+    assert item.exon_labels == [(100, 150, "1"), (200, 260, "2")]
 
 
 def test_gtf_groups_features_by_transcript_and_infers_utrs(tmp_path):
     gtf = tmp_path / "genes.gtf"
     attributes = 'gene_id "g1"; transcript_id "tx1"; gene_name "GENE1";'
     gtf.write_text(
-        "chr1\ttest\texon\t101\t150\t.\t-\t.\t" + attributes + "\n"
-        "chr1\ttest\texon\t201\t260\t.\t-\t.\t" + attributes + "\n"
+        "chr1\ttest\texon\t101\t150\t.\t-\t.\t" + attributes + ' exon_number "2";\n'
+        "chr1\ttest\texon\t201\t260\t.\t-\t.\t" + attributes + ' exon_number "1";\n'
         "chr1\ttest\tCDS\t121\t150\t.\t-\t0\t" + attributes + "\n"
         "chr1\ttest\tCDS\t201\t230\t.\t-\t0\t" + attributes + "\n",
         encoding="utf-8",
@@ -146,6 +147,7 @@ def test_gtf_groups_features_by_transcript_and_infers_utrs(tmp_path):
     assert item.strand == "-"
     assert item.blocks == [(120, 150), (200, 230)]
     assert item.utrs == [(100, 120), (230, 260)]
+    assert item.exon_labels == [(100, 150, "2"), (200, 260, "1")]
 
 
 def test_annotation_default_colours_depend_on_track_type(tmp_path):

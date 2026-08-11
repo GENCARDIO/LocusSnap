@@ -320,6 +320,7 @@ def test_parser_accepts_rich_rna_junction_and_fusion_options():
         "--rna_strandness", "reverse", "--junction_labels", "full",
         "--min_fusion_reads", "4", "--fusion_breakpoint_tolerance", "15",
         "--fusion_min_distance", "50000", "--min_fusion_mapq", "30",
+        "--rna_sample", "1", "--show_exon_numbers",
         "--rna_evidence_tsv", "events.tsv",
     ])
 
@@ -331,6 +332,8 @@ def test_parser_accepts_rich_rna_junction_and_fusion_options():
     assert args.fusion_breakpoint_tolerance == 15
     assert args.fusion_min_distance == 50_000
     assert args.min_fusion_mapq == 30
+    assert args.rna_sample == [1]
+    assert args.show_exon_numbers
     assert args.rna_evidence_tsv == "events.tsv"
 
 

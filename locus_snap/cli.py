@@ -269,6 +269,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Label for the corresponding repeated --bam, supplied in the same order.",
     )
     parser.add_argument(
+        "--rna_sample", action="append", type=int, metavar="N",
+        help=("Draw --rna_mode/--sashimi/--rna_fusions tracks only for repeated "
+              "--bam sample N (1-based); repeat for multiple RNA samples. By "
+              "default RNA evidence is drawn for every sample."),
+    )
+    parser.add_argument(
         "--vcf_companion", action="append", metavar="VCF",
         help=("VCF companion for each repeated --bam, in the same order. Repeat once per "
               "BAM and use 'none' for a sample without a VCF. Compressed VCFs require an index."),
@@ -623,6 +629,11 @@ def build_parser() -> argparse.ArgumentParser:
               "available for one BAM and one explicit region."),
     )
     parser.add_argument(
+        "--show_exon_numbers", action="store_true",
+        help=("Label gene-track exons when GTF/GFF exon_number metadata is present; "
+              "BED12 exons are numbered from transcript 5-prime to 3-prime."),
+    )
+    parser.add_argument(
         "--coverage_vaf_threshold", type=float, default=DEFAULT_COVERAGE_VAF_THRESHOLD,
         metavar="FRACTION",
         help=("Colour SNV allele counts in the coverage track when their observed allele "
@@ -740,6 +751,23 @@ def main(argv=None) -> int:
     for index, bam_path in enumerate(bam_paths):
         if not sample_labels[index]:
             sample_labels[index] = os.path.splitext(os.path.basename(bam_path))[0]
+
+    rna_sample_indices = []
+    configured_rna_samples = args.rna_sample or []
+    if not isinstance(configured_rna_samples, list):
+        configured_rna_samples = [configured_rna_samples]
+    for sample_index in configured_rna_samples:
+        if sample_index < 1 or sample_index > len(bam_paths):
+            log.error(
+                "--rna_sample must be between 1 and the number of BAMs (%d).",
+                len(bam_paths),
+            )
+            return 1
+        if sample_index not in rna_sample_indices:
+            rna_sample_indices.append(sample_index)
+    if rna_sample_indices and not (args.rna_mode or args.sashimi or args.rna_fusions):
+        log.error("--rna_sample requires --rna_mode, --sashimi, or --rna_fusions.")
+        return 1
 
     companion_vcfs = []
     for value in args.vcf_companion or []:
@@ -1088,6 +1116,8 @@ def main(argv=None) -> int:
         molecule_consensus_fraction=args.molecule_consensus_fraction,
         annotate_gap=not args.no_annotate,
         show_indel_lengths=args.show_indel_lengths,
+        show_exon_numbers=args.show_exon_numbers,
+        rna_sample_indices=rna_sample_indices,
         fig_width=args.fig_width,
         dpi=args.dpi,
         long_gap_threshold=args.long_gap_threshold,

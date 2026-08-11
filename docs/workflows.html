@@ -10,11 +10,11 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header" data-header><div class="nav-shell"><a class="brand" href="index.html"><img src="assets/favicon.svg" alt="" width="36" height="36"><span>LocusSnap</span></a><button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false" data-menu-toggle><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><nav class="site-nav" aria-label="Main navigation" data-menu><a href="getting-started.html">Start</a><a href="workflows.html" aria-current="page">Workflows</a><a href="recipes.html">Recipes</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><div class="nav-actions"><button class="icon-button theme-toggle" type="button" aria-label="Use dark theme" data-theme-toggle><svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg><svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg></button><a class="button button-small button-ghost" href="https://github.com/GENCARDIO/LocusSnap">GitHub</a></div></div></header>
     <main id="main">
-      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Task oriented</p><h1>Workflow guides</h1><p>Choose the biological question first. Each workflow combines only the tracks and read evidence that help answer it.</p></div></section>
+      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Analysis</p><h1>Workflow guides</h1><p>Commands for small variants, structural events, RNA-seq, long reads, UMI families, cohorts, and chromatin contacts.</p></div></section>
       <div class="docs-layout">
         <aside class="docs-sidebar"><p class="docs-sidebar-label">Documentation</p><nav><a href="getting-started.html">Getting started</a><a href="workflows.html" aria-current="page">Workflow guides</a><a href="recipes.html">Recipes</a><a href="configuration.html">Configuration</a><a href="reference.html">Reference</a><a href="gallery.html">Gallery</a><a href="faq.html">FAQ</a></nav><p class="docs-sidebar-label">Workflows</p><nav><a href="#small-variants">Small variants</a><a href="#structural-variants">Structural variants</a><a href="#rna">RNA-seq</a><a href="#long-reads">Long reads</a><a href="#molecules">UMI molecules</a><a href="#batch">Cohort reports</a><a href="#contacts">Hi-C contacts</a></nav></aside>
         <article class="docs-content">
-          <p class="docs-lede">These presets are starting points. Keep the locus narrow enough for the evidence you want to inspect, and add <code>--config lab-style.yaml</code> when the same visual choices should be reused.</p>
+          <p class="docs-lede">Keep windows narrow enough for base-level evidence. Apply <code>--config lab-style.yaml</code> to reuse colours, dimensions, and display defaults.</p>
           <div class="task-grid">
             <a class="task-card" href="#small-variants"><strong>SNV / indel</strong><span>Base sorting, VAF and close zoom.</span></a><a class="task-card" href="#structural-variants"><strong>Breakpoint</strong><span>Discordant pairs, split reads and mates.</span></a><a class="task-card" href="#rna"><strong>RNA-seq</strong><span>Junction classification and fusions.</span></a><a class="task-card" href="#batch"><strong>Cohort</strong><span>Repeated samples and HTML reports.</span></a>
           </div>
@@ -32,7 +32,7 @@
   --min_variant_mapq 20 \
   --center_guide \
   --output_name snv-review</code></pre>
-          <div class="callout"><strong>Close zoom is intentional.</strong><p>Reference and individual read bases are shown only below the configured reference-span threshold. This avoids unreadable letters over broad regions.</p></div>
+          <div class="callout"><strong>Base labels require close zoom.</strong><p>Reference and individual read bases appear only below <code>--max_reference_span</code>. The default threshold is 250 bp.</p></div>
 
           <h2 id="structural-variants">Structural variants and translocations</h2>
           <h3>Pair evidence within one locus</h3>
@@ -73,6 +73,20 @@
   --rna_evidence_tsv rna-evidence.tsv \
   --output_name rna-review</code></pre>
           <ul><li><strong>K</strong> denotes an annotated exon boundary; <strong>N</strong> denotes a novel junction.</li><li>Full labels add canonical motifs such as <code>GT-AG</code>.</li><li>Fusion support is labelled <code>S#/P#</code> for unique split reads and spanning pairs.</li></ul>
+
+          <h3>Corroborate a fusion across DNA and RNA</h3>
+          <p>Repeat both BAM arguments and both breakpoint regions to make a sample-by-locus matrix. For EML4::ALK V1, the DNA rows should expose the large intrachromosomal inversion through same-strand pairs and split alignments, while the RNA rows should terminate at EML4 exon 13 and resume at ALK exon 20.</p>
+          <pre><code>locus-snap \
+  --bam tumour-dna.bam --bam tumour-rna.bam \
+  --sample_label 'DNA-seq · inv(2)' \
+  --sample_label 'RNA-seq · EML4(e13)::ALK(e20), V1' \
+  --region chr2:29445751-29448650 \
+  --region chr2:42521851-42523650 \
+  --track transcripts.gtf.gz \
+  --rna_mode --rna_sample 2 \
+  --show_exon_numbers --view_as_pairs --link_breakpoints \
+  --fusion_min_distance 1000000 \
+  --output_name eml4-alk-dna-rna</code></pre>
 
           <h2 id="long-reads">Long reads and base modifications</h2>
           <pre><code>locus-snap \

@@ -24,7 +24,7 @@
     </header>
 
     <main id="main">
-      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Start here</p><h1>Getting started</h1><p>Install LocusSnap, prepare indexed sequencing files, and produce your first reproducible locus figure.</p></div></section>
+      <section class="docs-hero"><div class="page-shell"><p class="eyebrow">Documentation · Start here</p><h1>Getting started</h1><p>Install LocusSnap, index BAM/CRAM inputs, and render a genomic interval.</p></div></section>
       <div class="docs-layout">
         <aside class="docs-sidebar" aria-label="Documentation sections">
           <p class="docs-sidebar-label">Documentation</p>
@@ -34,8 +34,8 @@
         </aside>
 
         <article class="docs-content">
-          <p class="docs-lede">The shortest path is an indexed BAM, a genomic interval, and one command. Add a matching FASTA when you want reference bases, mismatch colours, or CRAM decoding.</p>
-          <div class="docs-toc"><strong>What you will do</strong><ul><li><a href="#install">Install the command</a></li><li><a href="#inputs">Check your input files</a></li><li><a href="#first-plot">Render a locus</a></li><li><a href="#next">Choose the next workflow</a></li></ul></div>
+          <p class="docs-lede">Required inputs are an indexed BAM and a genomic interval. CRAM decoding, reference bases, mismatch colours, and splice motifs require a matching FASTA.</p>
+          <div class="docs-toc"><strong>Contents</strong><ul><li><a href="#install">Install the command</a></li><li><a href="#inputs">Check input files</a></li><li><a href="#first-plot">Render a locus</a></li><li><a href="#next">Additional workflows</a></li></ul></div>
 
           <h2 id="install">Installation</h2>
           <h3>Install from PyPI</h3>
@@ -78,7 +78,7 @@ samtools faidx reference.fa</code></pre>
   --output_name locus</code></pre>
           <p>The result is <code>out/locus.png</code>. Human hg19/GRCh37 and hg38/GRCh38 BAMs can receive automatic cytoband and RefSeq context. Disable network-backed RefSeq resolution with <code>--refseq none</code>.</p>
 
-          <h3>Choose another output format</h3>
+          <h3>Output formats</h3>
           <pre><code># Editable vector output
 locus-snap --bam sample.bam --region chr1:1000-2000 \
   --output_name figure.svg
@@ -97,7 +97,7 @@ locus-snap --bam sample.bam --region chr1:1000-2000 \
             <li>The Alignment legend explains concordant, discordant, insertion, deletion, and strand-specific evidence that is present.</li>
           </ul>
 
-          <h2 id="next">Choose a next step</h2>
+          <h2 id="next">Additional workflows</h2>
           <div class="task-grid">
             <a class="task-card" href="workflows.html#small-variants"><strong>Review a small variant</strong><span>Sort by an SNV and show allele counts.</span></a>
             <a class="task-card" href="workflows.html#structural-variants"><strong>Inspect a structural event</strong><span>Pair views, mate windows, and linked loci.</span></a>

@@ -1,9 +1,7 @@
 # LocusSnap website
 
 This directory contains the static, multi-page project website for GitHub
-Pages. The information architecture separates onboarding, task guides,
-copyable recipes, configuration, technical reference, the curated gallery,
-and troubleshooting:
+Pages:
 
 ```text
 index.html              project landing page

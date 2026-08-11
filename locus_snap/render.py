@@ -591,6 +591,7 @@ class AlignmentRenderer:
         min_variant_mapq: int = 0,
         show_variant_counts: bool = False,
         show_indel_lengths: bool = False,
+        show_exon_numbers: bool = False,
         haplotype_view: str = "none",
         read_tag: Optional[str] = None,
         tag_view: str = "none",
@@ -738,6 +739,7 @@ class AlignmentRenderer:
         self.min_variant_mapq = min_variant_mapq
         self.show_variant_counts = show_variant_counts
         self.show_indel_lengths = show_indel_lengths
+        self.show_exon_numbers = show_exon_numbers
         if haplotype_view not in ("none", "color", "split"):
             raise ValueError("Haplotype view must be none, color, or split.")
         if tag_view not in ("none", "color", "split"):
@@ -1561,9 +1563,11 @@ class AlignmentRenderer:
                 linewidth=0.35, zorder=7,
             )
             local_gene = gene_label_at(genomic_tracks, chrom, local)
-            partner_label = (
-                gene_label_at(genomic_tracks, chrom, fusion.partner_breakpoint)
-                if partner_visible else None
+            # Explicit multi-locus views may supply the remote locus's loaded
+            # annotation slice even when the partner lies outside this axis.
+            partner_label = gene_label_at(
+                genomic_tracks, fusion.partner_chrom,
+                fusion.partner_breakpoint,
             )
             source = local_gene or f"{chrom}:{local + 1:,}"
             partner = partner_label or f"{fusion.partner_chrom}:{fusion.partner_breakpoint + 1:,}"
@@ -1794,6 +1798,24 @@ class AlignmentRenderer:
                             facecolor=track.color, edgecolor=track.color,
                             linewidth=self.styles["annotation_edge_width"], zorder=3,
                         ))
+
+                if self.show_exon_numbers and item.exon_labels:
+                    axes_width_px = max(ax.get_window_extent().width, 1)
+                    genomic_span = max(window_end - window_start, 1)
+                    for exon_start, exon_end, exon_label in item.exon_labels:
+                        lo = max(exon_start, window_start)
+                        hi = min(exon_end, window_end)
+                        if lo >= hi:
+                            continue
+                        visible_width_px = (hi - lo) * axes_width_px / genomic_span
+                        if visible_width_px < max(8, len(exon_label) * 4.5):
+                            continue
+                        ax.text(
+                            (lo + hi) / 2, center, exon_label,
+                            ha="center", va="center", fontsize=5.0,
+                            color=self.visual_colors["contrast_edge"],
+                            fontweight="bold", clip_on=True, zorder=5,
+                        )
 
                 # Repeated small arrows on introns make transcript direction
                 # readable without competing with exon blocks.
@@ -2750,9 +2772,6 @@ class AlignmentRenderer:
                 companion_names.append(companion_name)
                 tracks.append(companion_name)
                 ratios.append(self.annotation_track_height(annotation))
-            panel_track_names.append(
-                (header_name, cov_name, mod_name, sashimi_name, aln_name, companion_names)
-            )
             if self.show_coverage:
                 tracks.append(cov_name)
                 ratios.append(self.styles["coverage_track_height_in"])
@@ -2767,9 +2786,20 @@ class AlignmentRenderer:
             ):
                 tracks.append(mod_name)
                 ratios.append(self.styles["modification_track_height_in"])
-            if self.show_rna_evidence:
+            show_panel_rna_evidence = (
+                self.show_rna_evidence
+                and panel.get("show_rna_evidence", True)
+            )
+            if show_panel_rna_evidence:
                 tracks.append(sashimi_name)
                 ratios.append(self.styles["sashimi_track_height_in"])
+            panel_track_names.append(
+                (
+                    header_name, cov_name, mod_name,
+                    sashimi_name if show_panel_rna_evidence else None,
+                    aln_name, companion_names,
+                )
+            )
             tracks.append(aln_name)
             ratios.append(max(n_rows * self.row_height_in, self.row_height_in))
 
@@ -2882,7 +2912,7 @@ class AlignmentRenderer:
                     window_start, window_end,
                 )
 
-            if self.show_rna_evidence:
+            if sashimi_name is not None:
                 sashimi_reads = panel.get("all_reads_for_coverage")
                 if sashimi_reads is None:
                     sashimi_reads = []
@@ -3351,7 +3381,11 @@ class AlignmentRenderer:
             if show_sample_modifications:
                 tracks.append(modification_name)
                 ratios.append(self.styles["modification_track_height_in"])
-            if self.show_rna_evidence:
+            show_sample_rna_evidence = self.show_rna_evidence and any(
+                locus["samples"][sample_index].get("show_rna_evidence", True)
+                for locus in loci
+            )
+            if show_sample_rna_evidence:
                 tracks.append(sashimi_name)
                 ratios.append(self.styles["sashimi_track_height_in"])
             if self.show_alignments:
@@ -3366,7 +3400,7 @@ class AlignmentRenderer:
                 "companions": companion_names,
                 "coverage": coverage_name,
                 "modifications": modification_name if show_sample_modifications else None,
-                "sashimi": sashimi_name,
+                "sashimi": sashimi_name if show_sample_rna_evidence else None,
                 "alignments": alignment_name,
             })
 
@@ -3391,6 +3425,15 @@ class AlignmentRenderer:
                 color=self.visual_colors["primary_text"], fontweight="bold",
                 va="top", ha=title_ha,
             )
+
+        # Fusion partners may sit in another displayed locus. Supplying all
+        # visible annotation slices lets each arc use both gene names instead
+        # of falling back to a chromosome coordinate for its remote endpoint.
+        multi_locus_genomic_tracks = [
+            annotation
+            for visible_locus in loci
+            for annotation in visible_locus.get("genomic_tracks", [])
+        ]
 
         for locus_index, locus in enumerate(loci):
             chrom = locus["chrom"]
@@ -3505,14 +3548,16 @@ class AlignmentRenderer:
                         axes_by_track[names["modifications"]],
                         modification_reads, start, end,
                     )
-                if self.show_rna_evidence:
+                if names["sashimi"] is not None and sample.get(
+                    "show_rna_evidence", True
+                ):
                     sashimi_reads = sample.get("all_reads_for_coverage")
                     if sashimi_reads is None:
                         sashimi_reads = [read for row in rows for read in row]
                     self.draw_sashimi_track(
                         axes_by_track[names["sashimi"]], sashimi_reads, start, end,
                         chrom=chrom, reference=reference,
-                        genomic_tracks=locus.get("genomic_tracks", []),
+                        genomic_tracks=multi_locus_genomic_tracks,
                     )
                 if self.show_alignments:
                     alignment_ax = axes_by_track[names["alignments"]]

@@ -46,6 +46,7 @@ class AnnotationItem:
     strand: str = "."
     blocks: List[Interval] = field(default_factory=list)  # full-height exon/CDS blocks
     utrs: List[Interval] = field(default_factory=list)    # thin UTR blocks
+    exon_labels: List[Tuple[int, int, str]] = field(default_factory=list)
     group: str = ""
     group_label: str = ""
     transcript_label: str = ""
@@ -264,6 +265,12 @@ def collapse_annotation_items(items: Sequence[AnnotationItem]) -> List[Annotatio
                 primary_label = member.primary_label
                 break
 
+        exon_labels = sorted({
+            exon_label
+            for member in members
+            for exon_label in member.exon_labels
+        })
+
         collapsed.append(AnnotationItem(
             start=start,
             end=end,
@@ -271,6 +278,7 @@ def collapse_annotation_items(items: Sequence[AnnotationItem]) -> List[Annotatio
             strand=next(iter(strands)) if len(strands) == 1 else ".",
             blocks=blocks,
             utrs=utrs,
+            exon_labels=exon_labels,
             group=group,
             group_label=group_label,
             primary_rank=primary_rank,
@@ -403,9 +411,17 @@ def parse_bed(lines: Iterable[str], chrom: str, start: int, end: int) -> List[An
             else:
                 thick_blocks = exons
 
+        exon_labels = []
+        if len(fields) >= 12:
+            ordered_exons = exons if strand != "-" else list(reversed(exons))
+            exon_labels = [
+                (exon_start, exon_end, str(exon_index))
+                for exon_index, (exon_start, exon_end) in enumerate(ordered_exons, 1)
+            ]
         items.append(AnnotationItem(
             start=item_start, end=item_end, name=name, strand=strand,
             blocks=merge_intervals(thick_blocks), utrs=merge_intervals(utrs),
+            exon_labels=exon_labels,
         ))
     return items
 
@@ -793,7 +809,7 @@ def parse_gff(lines: Iterable[str], chrom: str, start: int, end: int) -> List[An
                 "name": label or group_id, "group": gene_group,
                 "group_label": gene_label,
                 "transcript_label": transcript_label,
-                "exons": [], "cds": [], "utrs": [],
+                "exons": [], "cds": [], "utrs": [], "exon_labels": [],
                 "primary_rank": primary_rank,
                 "primary_label": primary_label,
             })
@@ -822,6 +838,14 @@ def parse_gff(lines: Iterable[str], chrom: str, start: int, end: int) -> List[An
                 model["primary_label"] = primary_label
             if feature_type == "exon":
                 model["exons"].append((feature_start, feature_end))
+                exon_label = (
+                    attributes.get("exon_number") or attributes.get("exon")
+                    or attributes.get("rank")
+                )
+                if exon_label:
+                    model["exon_labels"].append(
+                        (feature_start, feature_end, str(exon_label))
+                    )
             elif feature_type == "cds":
                 model["cds"].append((feature_start, feature_end))
             elif feature_type in UTR_TYPES:
@@ -860,6 +884,7 @@ def parse_gff(lines: Iterable[str], chrom: str, start: int, end: int) -> List[An
             start=min(model["start"], exon_start),
             end=max(model["end"], exon_end),
             name=model["name"], strand=model["strand"], blocks=blocks, utrs=utrs,
+            exon_labels=sorted(model["exon_labels"]),
             group=model["group"],
             group_label=gene_labels.get(model["group"], model["group_label"]),
             transcript_label=model["transcript_label"],

@@ -6,8 +6,6 @@ Create an IGV-like image from an indexed BAM without opening a genome browser.
 
 ## Documentation
 
-Choose the shortest entry point for the task:
-
 | Guide | Use it for |
 | --- | --- |
 | [Getting started](https://gencardio.github.io/LocusSnap/getting-started.html) | installation, input preparation, and the first snapshot |
@@ -17,10 +15,6 @@ Choose the shortest entry point for the task:
 | [Reference](https://gencardio.github.io/LocusSnap/reference.html) | CLI groups, file formats, exports, and Python API |
 | [Gallery](https://gencardio.github.io/LocusSnap/gallery.html) | the ten representative figures and their reproducible sources |
 | [FAQ](https://gencardio.github.io/LocusSnap/faq.html) | indexes, CRAM, reference compatibility, performance, and troubleshooting |
-
-The remainder of this README is the compact repository reference. The website
-organizes the same capabilities by task so new users do not need to navigate a
-single long option catalogue.
 
 ## Install
 
@@ -88,9 +82,9 @@ full-resolution figure.
       <sub>Ideogram, RefSeq isoforms, coverage, alignments, and grouped legend.</sub>
     </td>
     <td width="50%">
-      <a href="out/41_rnaseq_junction_fusion.png"><img src="out/41_rnaseq_junction_fusion.png" alt="Two-locus RNA-seq view with annotated and novel splice junctions plus reciprocal fusion evidence"></a><br>
-      <strong>RNA junctions and gene fusion</strong><br>
-      <sub>Annotated/novel splice motifs, exon skipping, SA split reads, and spanning-pair fusion support.</sub>
+      <a href="out/41_rnaseq_junction_fusion.png"><img src="out/41_rnaseq_junction_fusion.png" alt="Matched DNA-seq and RNA-seq evidence for the EML4 exon 13 to ALK exon 20 fusion"></a><br>
+      <strong>EML4::ALK across DNA and RNA</strong><br>
+      <sub>A 13.1 Mb inv(2) with FF/RR and split-read DNA support, alongside the expressed EML4(e13)::ALK(e20) V1 junction.</sub>
     </td>
   </tr>
   <tr>
@@ -144,8 +138,8 @@ full-resolution figure.
 </table>
 
 The synthetic examples use expanded, deterministic datasets: 240 tumour, 180
-normal, 210 relapse, 300 METex14 RNA alignments, 101 junction/fusion RNA
-alignments, 703 structural-variant
+normal, 210 relapse, 300 METex14 RNA alignments, 150 EML4::ALK RNA alignments,
+582 matched EML4::ALK inversion DNA alignments, 703 structural-variant
 alignments, and 16,000 reads across a purity-aware CNV locus; 12 general VCF
 records; 26 positional UMI families; 83 heterozygous BAF loci; 12 H3K27ac,
 7 H3K27me3, and 24 DNase peaks;
@@ -517,6 +511,17 @@ ignored. Use `--rna_fusions` instead of `--rna_mode` when only fusion evidence
 is wanted. The optional TSV contains stable one-row summaries for both
 junctions and fusion candidates and currently supports one BAM and one region.
 
+The maintained fusion example stacks matched DNA-seq and RNA-seq at both
+breakpoints. Its DNA panel models the chromosome-2 inversion with same-strand
+discordant pairs and reciprocal `SA` alignments; its RNA panel places the
+mature junction at EML4 exon 13 and ALK exon 20. Run
+`./regenerate_demo_examples.sh` to rebuild
+[`out/41_rnaseq_junction_fusion.png`](out/41_rnaseq_junction_fusion.png) and
+the deterministic inputs beneath `out/demo_data/`.
+The reproduction command uses `--rna_sample 2`, so junction/fusion arcs are
+reserved for the RNA BAM, and `--show_exon_numbers`, so the GTF-provided exon
+numbers appear inside sufficiently wide exon boxes.
+
 ### Stack several BAMs and matched VCFs
 
 ```bash
@@ -593,15 +598,14 @@ variants are point-sized, so `--flank 0` (the default) renders a ~1bp-wide
 image — set `--flank` to whatever context you want around each call.
 Records with no ALT allele (e.g. gVCF reference blocks) are skipped.
 
-`--report` (optionally `--report NAME.html`) additionally writes one
-self-contained HTML file with every rendered image embedded inline, alongside
+`--report` (optionally `--report NAME.html`) writes one self-contained HTML
+file with every rendered image embedded inline, alongside
 a grouped summary of reads/gapped%/discordant%/soft-clipped for every sample
 and region. Each region card also reports changes versus the first BAM (the
 baseline) in reads, gapped and discordant percentage points, and soft-clipped
-read count. This is useful for tumour/normal or longitudinal review without
-opening each image. The HTML is self-contained and can be shared as one file.
-It requires `--batch_regions` and a browser-viewable `--output_format` (png,
-jpg, jpeg, webp, or svg — not pdf/tiff/svgz).
+read count. The report supports tumour/normal and longitudinal review without
+opening each image. It requires `--batch_regions` and a browser-viewable
+`--output_format` (png, jpg, jpeg, webp, or svg — not pdf/tiff/svgz).
 
 For a reproducible three-sample example, run `python3 generate_demo_data.py`
 and use `out/demo_data/annotations/demo_multi_sample_review.bed` with the
@@ -1057,11 +1061,13 @@ CIGAR insertion and deletion lengths are hidden by default. Show them with
 | `--modification_code CODE` | retain one modification type; repeatable |
 | `--min_mod_probability F` | confidence threshold for read markers and fractions |
 | `--rna_mode` | show classified splice junctions and clustered fusion evidence |
+| `--rna_sample N` | restrict RNA evidence tracks to repeated BAM sample N; repeatable |
 | `--rna_fusions` | show fusion candidates without enabling splice-junction arcs |
 | `--min_junction_anchor BP` | require matched bases on both sides of a junction |
 | `--rna_strandness MODE` | infer transcript strand from the RNA library orientation |
 | `--junction_labels MODE` | show count, annotation status, or status plus motif |
 | `--min_fusion_reads N` | minimum unique split/spanning support for a fusion |
+| `--show_exon_numbers` | label GTF/GFF or BED12 exons when numbering is available |
 | `--rna_evidence_tsv PATH` | export junction and fusion summaries for one locus |
 | `--track PATH` | add a genomic track; repeatable |
 | `--custom_track SPEC` | add a named, coloured, sized track |
@@ -1209,5 +1215,5 @@ publisher with:
 The `pypi` environment name must match `environment.name` in
 `publish.yml`; creating a matching
 [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)
-named `pypi` in this repo's settings (Settings → Environments) additionally
-lets you require manual approval before a publish runs, if wanted.
+named `pypi` in this repo's settings (Settings → Environments) can require
+manual approval before publishing.
