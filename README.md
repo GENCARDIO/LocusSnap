@@ -1186,10 +1186,10 @@ new release automatically when a tag matching `X.Y.Z` or `vX.Y.Z` is pushed
 
 ```bash
 # 1. bump the version (single source of truth for the whole package)
-#    in pyproject.toml, e.g. version = "0.3.0"
-git commit -am "Release 0.3.0"
-git tag 0.3.0
-git push origin main 0.3.0
+#    in pyproject.toml, e.g. version = "0.4.0"
+git commit -am "Release 0.4.0"
+git tag 0.4.0
+git push origin main 0.4.0
 ```
 
 The workflow runs the full test suite first; publishing only proceeds if it
