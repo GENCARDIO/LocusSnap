@@ -44,6 +44,16 @@ from locus_snap.config import (
 from locus_snap.cytobands import Cytoband
 from locus_snap.read_model import AlignedRead, BaseModification
 from locus_snap.reference import ReferenceWindow
+from locus_snap.rna import (
+    CANONICAL_SPLICE_MOTIFS,
+    RNA_STRANDNESS_MODES,
+    annotated_junctions,
+    collect_fusion_evidence,
+    collect_splice_junctions,
+    gene_label_at,
+    is_annotated_junction,
+    splice_motif,
+)
 from locus_snap.track_plugin import (
     LoadedPluginTrack, TrackCanvas, TrackPluginError,
 )
@@ -455,18 +465,13 @@ def compute_sparse_snv_evidence(
 def compute_splice_junctions(
     reads: List[AlignedRead], strand_mode: str = "combined"
 ) -> Dict[Tuple[int, int, str], int]:
-    """Count RNA splice junctions represented by CIGAR N operations."""
-    if strand_mode not in ("combined", "split"):
-        raise ValueError("Sashimi strand mode must be combined or split.")
-    junctions = {}
-    for read in reads:
-        strand = read.strand if strand_mode == "split" else "."
-        for position, length, is_skip in read.deletions:
-            if not is_skip or length <= 0:
-                continue
-            key = (position, position + length, strand)
-            junctions[key] = junctions.get(key, 0) + 1
-    return junctions
+    """Backward-compatible count view over richer junction evidence."""
+    return {
+        key: evidence.count
+        for key, evidence in collect_splice_junctions(
+            reads, strand_mode=strand_mode
+        ).items()
+    }
 
 
 def nice_tick_positions(start: int, end: int, target: int = 8) -> List[int]:
@@ -598,6 +603,14 @@ class AlignmentRenderer:
         show_sashimi: bool = False,
         min_junction_reads: int = 1,
         sashimi_strand: str = "combined",
+        min_junction_anchor: int = 0,
+        rna_strandness: str = "alignment",
+        junction_labels: str = "count",
+        show_fusions: bool = False,
+        min_fusion_reads: int = 2,
+        fusion_breakpoint_tolerance: int = 10,
+        fusion_min_distance: int = 100_000,
+        min_fusion_mapq: int = 20,
         grid_mode: str = "major",
         highlight_regions: Optional[List[HighlightRegion]] = None,
         highlight_color: str = "#ffd54f",
@@ -607,6 +620,7 @@ class AlignmentRenderer:
         show_base_modifications: bool = False,
         modification_codes: Optional[List[str]] = None,
         min_mod_probability: float = 0.5,
+        molecule_mode: bool = False,
     ):
         theme = visual_config or load_config()
         self.base_colors = dict(theme["base_colors"])
@@ -623,6 +637,7 @@ class AlignmentRenderer:
         self.chromosome_palette = list(theme["chromosome_palette"])
         self.long_read_colors = dict(theme["long_read_colors"])
         self.modification_colors = dict(theme["modification_colors"])
+        self.molecule_colors = dict(theme["molecule_colors"])
         self.styles = dict(theme["styles"])
         self.sort_base_position = sort_base_position
         self.sort_reference_base = sort_reference_base
@@ -630,12 +645,35 @@ class AlignmentRenderer:
         self.active_sort_reference_base = sort_reference_base
         self.show_center_guide = show_center_guide
         self.show_sashimi = show_sashimi
+        self.show_fusions = show_fusions
+        self.show_rna_evidence = show_sashimi or show_fusions
         if min_junction_reads < 1:
             raise ValueError("Minimum junction-read support must be at least one.")
         self.min_junction_reads = min_junction_reads
         if sashimi_strand not in ("combined", "split"):
             raise ValueError("Sashimi strand mode must be combined or split.")
         self.sashimi_strand = sashimi_strand
+        if min_junction_anchor < 0:
+            raise ValueError("Minimum junction anchor cannot be negative.")
+        self.min_junction_anchor = min_junction_anchor
+        if rna_strandness not in RNA_STRANDNESS_MODES:
+            raise ValueError(
+                f"RNA strandness must be one of: {', '.join(RNA_STRANDNESS_MODES)}."
+            )
+        self.rna_strandness = rna_strandness
+        if junction_labels not in ("count", "status", "full"):
+            raise ValueError("Junction labels must be count, status, or full.")
+        self.junction_labels = junction_labels
+        if min_fusion_reads < 1:
+            raise ValueError("Minimum fusion-read support must be at least one.")
+        if fusion_breakpoint_tolerance < 0 or fusion_min_distance < 0:
+            raise ValueError("Fusion breakpoint tolerance and distance cannot be negative.")
+        if min_fusion_mapq < 0:
+            raise ValueError("Minimum fusion MAPQ cannot be negative.")
+        self.min_fusion_reads = min_fusion_reads
+        self.fusion_breakpoint_tolerance = fusion_breakpoint_tolerance
+        self.fusion_min_distance = fusion_min_distance
+        self.min_fusion_mapq = min_fusion_mapq
         self.fig_width = fig_width
         self.dpi = dpi
         self.show_alignments = show_alignments
@@ -671,11 +709,12 @@ class AlignmentRenderer:
         if not 0 <= min_mod_probability <= 1:
             raise ValueError("Minimum modification probability must be between 0 and 1.")
         self.min_mod_probability = float(min_mod_probability)
+        self.molecule_mode = molecule_mode
         self.modification_labels_seen: set = set()
         self.show_coverage = show_coverage
         self.annotate_gap = annotate_gap
         self.max_mismatch_render_span = max_mismatch_render_span
-        self.pair_colors = pair_colors and not long_read_mode
+        self.pair_colors = pair_colors and not long_read_mode and not molecule_mode
         self.shade_by_mapq = shade_by_mapq
         self.mapq_cap = mapq_cap
         self.alignment_colors = dict(theme["alignment_colors"])
@@ -729,7 +768,7 @@ class AlignmentRenderer:
             legend_group_count = 5
         elif self.long_read_coloring or show_base_modifications:
             legend_group_count = 4
-        elif haplotype_view != "none" or tag_view != "none":
+        elif molecule_mode or haplotype_view != "none" or tag_view != "none":
             legend_group_count = 4
         elif self.pair_colors:
             legend_group_count = 4
@@ -896,6 +935,13 @@ class AlignmentRenderer:
                 color = self.long_read_colors["reverse"]
             else:
                 color = self.long_read_colors["forward"]
+        elif self.molecule_mode:
+            if getattr(read, "molecule_is_duplex", False):
+                color = self.molecule_colors["duplex"]
+            elif getattr(read, "molecule_family_size", 1) > 1:
+                color = self.molecule_colors["consensus"]
+            else:
+                color = self.molecule_colors["singleton"]
         elif self.pair_colors and read.pair_category == "interchrom":
             color = self.alignment_colors["interchrom"] or chrom_color(
                 read.mate_chrom, self.chromosome_palette,
@@ -980,7 +1026,7 @@ class AlignmentRenderer:
         if show_modification_track:
             tracks.append("modifications")
             ratios.append(self.styles["modification_track_height_in"])
-        if self.show_sashimi:
+        if self.show_rna_evidence:
             tracks.append("sashimi")
             ratios.append(self.styles["sashimi_track_height_in"])
         if self.show_alignments:
@@ -1068,14 +1114,15 @@ class AlignmentRenderer:
                 ax_by_track["modifications"], data_reads, window_start, window_end
             )
 
-        if self.show_sashimi:
+        if self.show_rna_evidence:
             sashimi_reads = all_reads_for_coverage
             if sashimi_reads is None:
                 sashimi_reads = []
                 for row in rows:
                     sashimi_reads.extend(row)
             self.draw_sashimi_track(
-                ax_by_track["sashimi"], sashimi_reads, window_start, window_end
+                ax_by_track["sashimi"], sashimi_reads, window_start, window_end,
+                chrom=chrom, reference=reference, genomic_tracks=genomic_tracks,
             )
 
         # --- alignments and genomic axis --------------------------------
@@ -1194,7 +1241,7 @@ class AlignmentRenderer:
             int(axes_width_pixels * self.styles["coverage_bins_per_pixel"]), 1
         )
         use_binned_coverage = span > bin_limit
-        coverage_label = "coverage"
+        coverage_label = "molecule coverage" if self.molecule_mode else "coverage"
         variant_width = 1.0
         if use_binned_coverage:
             edges, depth = compute_binned_coverage(reads, start, end, bin_limit)
@@ -1206,7 +1253,8 @@ class AlignmentRenderer:
                 )
                 bin_width = span / len(depth)
                 variant_width = max(bin_width * 0.55, 1.0)
-                coverage_label = f"coverage · {bin_width:.0f} bp/bin (mean)"
+                unit = "molecule coverage" if self.molecule_mode else "coverage"
+                coverage_label = f"{unit} · {bin_width:.0f} bp/bin (mean)"
         else:
             depth = compute_coverage(reads, start, end)
             positions = []
@@ -1346,58 +1394,106 @@ class AlignmentRenderer:
         )
 
     def draw_sashimi_track(
-        self, ax, reads: List[AlignedRead], start: int, end: int
+        self, ax, reads: List[AlignedRead], start: int, end: int,
+        chrom: str = "", reference: Optional[ReferenceWindow] = None,
+        genomic_tracks: Optional[List[LoadedAnnotationTrack]] = None,
     ) -> None:
-        """Draw count-labelled splice-junction arcs from CIGAR N blocks."""
-        junctions = compute_splice_junctions(reads, self.sashimi_strand)
+        """Draw classified splice junctions and clustered fusion evidence."""
+        junctions = collect_splice_junctions(
+            reads, strand_mode=self.sashimi_strand,
+            strandness=self.rna_strandness,
+            minimum_anchor=self.min_junction_anchor,
+        ) if self.show_sashimi else {}
+        known = annotated_junctions(genomic_tracks)
+        annotation_available = any(
+            track.kind in ("bed", "gff", "gff3", "gtf") and track.items
+            for track in genomic_tracks or []
+        )
         visible = []
-        for junction, count in junctions.items():
-            donor, acceptor, strand = junction
-            if count >= self.min_junction_reads and start <= donor < acceptor <= end:
-                visible.append((donor, acceptor, strand, count))
+        for evidence in junctions.values():
+            if (
+                evidence.count >= self.min_junction_reads
+                and start <= evidence.donor < evidence.acceptor <= end
+            ):
+                visible.append(evidence)
+
+        fusions = []
+        if self.show_fusions:
+            fusions = [
+                evidence for evidence in collect_fusion_evidence(
+                    reads, chrom,
+                    breakpoint_tolerance=self.fusion_breakpoint_tolerance,
+                    minimum_distance=self.fusion_min_distance,
+                    minimum_mapq=self.min_fusion_mapq,
+                )
+                if evidence.support >= self.min_fusion_reads
+                and start <= evidence.local_breakpoint <= end
+            ][:6]
+
         def junction_span_key(item):
-            return (item[1] - item[0], item[0])
+            return (item.acceptor - item.donor, item.donor)
 
         visible.sort(key=junction_span_key, reverse=True)
 
         if self.sashimi_strand == "split":
-            ax.set_ylim(-1.05, 1.05)
+            ax.set_ylim(-1.05, 1.28 if self.show_fusions else 1.05)
         else:
-            ax.set_ylim(-0.08, 1.05)
+            ax.set_ylim(-0.08, 1.28 if self.show_fusions else 1.05)
         ax.axhline(
             0, color=self.visual_colors["axis"], linewidth=0.55, zorder=1
         )
         ax.text(
-            -0.012, 0.5, "splice junctions", transform=ax.transAxes,
+            -0.012, 0.5,
+            "junctions / fusions" if self.show_fusions and self.show_sashimi else
+            "fusion evidence" if self.show_fusions else "splice junctions",
+            transform=ax.transAxes,
             ha="right", va="center", fontsize=7,
             color=self.visual_colors["sashimi_combined"],
             fontweight="bold", clip_on=False,
         )
-        if not visible:
+        if not visible and not fusions:
+            evidence_name = "RNA evidence" if self.show_fusions else "junctions"
             ax.text(
-                0.01, 0.60, f"No junctions with ≥{self.min_junction_reads} read(s)",
+                0.01, 0.60, f"No {evidence_name} above support thresholds",
                 transform=ax.transAxes, ha="left", va="center", fontsize=6.5,
                 color=self.visual_colors["secondary_text"],
             )
             return
 
-        maximum_span = 0
-        maximum_count = 0
-        for donor, acceptor, strand, count in visible:
-            if acceptor - donor > maximum_span:
-                maximum_span = acceptor - donor
-            if count > maximum_count:
-                maximum_count = count
-        for donor, acceptor, strand, count in visible:
+        maximum_span = max(
+            (evidence.acceptor - evidence.donor for evidence in visible), default=1
+        )
+        maximum_count = max((evidence.count for evidence in visible), default=1)
+        for evidence in visible:
+            donor, acceptor, strand = (
+                evidence.donor, evidence.acceptor, evidence.strand
+            )
+            count = evidence.count
             span = acceptor - donor
             direction = -1 if self.sashimi_strand == "split" and strand == "-" else 1
             height = self.styles["sashimi_arc_height"] * sqrt(span / maximum_span)
             height *= direction
-            color_key = (
-                "sashimi_minus" if direction < 0 else
-                "sashimi_plus" if self.sashimi_strand == "split" else
-                "sashimi_combined"
-            )
+            is_known = is_annotated_junction(chrom, evidence, known)
+            status = "known" if is_known else "novel" if annotation_available else "unclassified"
+            motif = splice_motif(evidence, reference)
+            noncanonical = motif is not None and motif not in CANONICAL_SPLICE_MOTIFS
+            if noncanonical:
+                color = self.visual_colors["junction_noncanonical"]
+                linestyle = ":"
+            elif status == "known":
+                color = self.visual_colors["junction_annotated"]
+                linestyle = "-"
+            elif status == "novel":
+                color = self.visual_colors["junction_novel"]
+                linestyle = "--"
+            else:
+                color_key = (
+                    "sashimi_minus" if direction < 0 else
+                    "sashimi_plus" if self.sashimi_strand == "split" else
+                    "sashimi_combined"
+                )
+                color = self.visual_colors[color_key]
+                linestyle = "-"
             width_fraction = sqrt(count / maximum_count)
             line_width = self.styles["sashimi_min_line_width"] + width_fraction * (
                 self.styles["sashimi_max_line_width"]
@@ -1411,17 +1507,74 @@ class AlignmentRenderer:
             ]
             path = Path(vertices, [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4])
             ax.add_patch(PathPatch(
-                path, facecolor="none", edgecolor=self.visual_colors[color_key],
+                path, facecolor="none", edgecolor=color, linestyle=linestyle,
                 linewidth=line_width, alpha=self.styles["sashimi_arc_alpha"],
                 capstyle="round", zorder=3,
             ))
             strand_label = strand if self.sashimi_strand == "split" else ""
+            status_label = {"known": "K", "novel": "N", "unclassified": "?"}[status]
+            label = f"{strand_label}{count}"
+            if self.junction_labels in ("status", "full"):
+                label += f" {status_label}"
+            if self.junction_labels == "full" and motif:
+                label += f" {motif}"
             label_y = height + direction * 0.06
             ax.text(
-                donor + span / 2, label_y, f"{strand_label}{count}",
+                donor + span / 2, label_y, label,
                 ha="center", va="bottom" if direction > 0 else "top",
                 fontsize=self.styles["sashimi_label_size"],
-                color=self.visual_colors[color_key], fontweight="bold", zorder=4,
+                color=color, fontweight="bold", zorder=4,
+            )
+
+        fusion_color = self.visual_colors["fusion_split"]
+        axis_span = max(end - start, 1)
+        for fusion_index, fusion in enumerate(fusions):
+            local = fusion.local_breakpoint
+            partner_visible = (
+                fusion.partner_chrom == chrom
+                and start <= fusion.partner_breakpoint <= end
+            )
+            if partner_visible:
+                target = fusion.partner_breakpoint
+            else:
+                target = end - axis_span * 0.01 if local <= (start + end) / 2 else start + axis_span * 0.01
+            direction = 1
+            height = max(0.48, 1.08 - fusion_index * 0.11)
+            fusion_span = target - local
+            vertices = [
+                (local, 0),
+                (local + fusion_span * 0.28, height),
+                (target - fusion_span * 0.18, height),
+                (target, height * 0.12),
+            ]
+            path = Path(
+                vertices, [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4]
+            )
+            ax.add_patch(PathPatch(
+                path, facecolor="none", edgecolor=fusion_color,
+                linewidth=self.styles["fusion_line_width"] * sqrt(fusion.support),
+                alpha=self.styles["fusion_arc_alpha"], capstyle="round", zorder=6,
+            ))
+            ax.scatter(
+                [local], [0], marker="D", s=self.styles["fusion_marker_size"],
+                facecolor=fusion_color, edgecolor=self.visual_colors["contrast_edge"],
+                linewidth=0.35, zorder=7,
+            )
+            local_gene = gene_label_at(genomic_tracks, chrom, local)
+            partner_label = (
+                gene_label_at(genomic_tracks, chrom, fusion.partner_breakpoint)
+                if partner_visible else None
+            )
+            source = local_gene or f"{chrom}:{local + 1:,}"
+            partner = partner_label or f"{fusion.partner_chrom}:{fusion.partner_breakpoint + 1:,}"
+            support_label = f"S{fusion.split_reads}/P{fusion.spanning_pairs}"
+            label_x = local + fusion_span * 0.58
+            ax.text(
+                label_x, height + direction * 0.045,
+                f"{source} → {partner} · {support_label}",
+                ha="center", va="bottom" if direction > 0 else "top",
+                fontsize=self.styles["fusion_label_size"], color=fusion_color,
+                fontweight="bold", clip_on=True, zorder=8,
             )
 
     def draw_ideogram(
@@ -2303,7 +2456,13 @@ class AlignmentRenderer:
         plot_right: float = 0.95,
     ) -> list:
         """Draw responsive topic cards below the genomic plot."""
-        if self.long_read_coloring:
+        if self.molecule_mode:
+            alignment_handles = [
+                Patch(facecolor=self.molecule_colors["singleton"], edgecolor="none", label="Singleton"),
+                Patch(facecolor=self.molecule_colors["consensus"], edgecolor="none", label="Consensus family"),
+                Patch(facecolor=self.molecule_colors["duplex"], edgecolor="none", label="Duplex family"),
+            ]
+        elif self.long_read_coloring:
             alignment_handles = [
                 Patch(facecolor=self.long_read_colors["forward"], edgecolor="none", label="Forward"),
                 Patch(facecolor=self.long_read_colors["reverse"], edgecolor="none", label="Reverse"),
@@ -2427,10 +2586,15 @@ class AlignmentRenderer:
         legend_ax.set_ylim(0, 1)
         legend_ax.set_axis_off()
 
-        alignment_columns = 3 if pair_geometry_handles else 1
-        alignment_weight = 3.35 if pair_geometry_handles else 1.25
+        alignment_columns = 3 if (pair_geometry_handles or self.molecule_mode) else 1
+        alignment_weight = (
+            3.35 if pair_geometry_handles else (2.15 if self.molecule_mode else 1.25)
+        )
         groups = [
-            ("Alignment", alignment_handles, alignment_columns, alignment_weight),
+            (
+                "Molecules" if self.molecule_mode else "Alignment",
+                alignment_handles, alignment_columns, alignment_weight,
+            ),
             ("Read events", event_handles, 1, 1.00),
         ]
         if haplotype_handles:
@@ -2603,7 +2767,7 @@ class AlignmentRenderer:
             ):
                 tracks.append(mod_name)
                 ratios.append(self.styles["modification_track_height_in"])
-            if self.show_sashimi:
+            if self.show_rna_evidence:
                 tracks.append(sashimi_name)
                 ratios.append(self.styles["sashimi_track_height_in"])
             tracks.append(aln_name)
@@ -2718,7 +2882,7 @@ class AlignmentRenderer:
                     window_start, window_end,
                 )
 
-            if self.show_sashimi:
+            if self.show_rna_evidence:
                 sashimi_reads = panel.get("all_reads_for_coverage")
                 if sashimi_reads is None:
                     sashimi_reads = []
@@ -2726,7 +2890,8 @@ class AlignmentRenderer:
                         sashimi_reads.extend(row)
                 self.draw_sashimi_track(
                     ax_by_track[sashimi_name], sashimi_reads,
-                    window_start, window_end,
+                    window_start, window_end, chrom=chrom, reference=reference,
+                    genomic_tracks=genomic_tracks,
                 )
 
             aln_ax = ax_by_track[aln_name]
@@ -2868,7 +3033,7 @@ class AlignmentRenderer:
         if show_modification_track:
             tracks.append("modifications")
             ratios.append(self.styles["modification_track_height_in"])
-        if self.show_sashimi:
+        if self.show_rna_evidence:
             tracks.append("sashimi")
             ratios.append(self.styles["sashimi_track_height_in"])
         tracks.append("alignments")
@@ -2996,14 +3161,16 @@ class AlignmentRenderer:
                     axes_by_track["modifications"], modification_reads, start, end
                 )
 
-            if self.show_sashimi:
+            if self.show_rna_evidence:
                 sashimi_reads = panel.get("all_reads_for_coverage")
                 if sashimi_reads is None:
                     sashimi_reads = []
                     for row in rows:
                         sashimi_reads.extend(row)
                 self.draw_sashimi_track(
-                    axes_by_track["sashimi"], sashimi_reads, start, end
+                    axes_by_track["sashimi"], sashimi_reads, start, end,
+                    chrom=chrom, reference=reference,
+                    genomic_tracks=panel_annotations,
                 )
 
             aln_ax = axes_by_track["alignments"]
@@ -3184,7 +3351,7 @@ class AlignmentRenderer:
             if show_sample_modifications:
                 tracks.append(modification_name)
                 ratios.append(self.styles["modification_track_height_in"])
-            if self.show_sashimi:
+            if self.show_rna_evidence:
                 tracks.append(sashimi_name)
                 ratios.append(self.styles["sashimi_track_height_in"])
             if self.show_alignments:
@@ -3338,12 +3505,14 @@ class AlignmentRenderer:
                         axes_by_track[names["modifications"]],
                         modification_reads, start, end,
                     )
-                if self.show_sashimi:
+                if self.show_rna_evidence:
                     sashimi_reads = sample.get("all_reads_for_coverage")
                     if sashimi_reads is None:
                         sashimi_reads = [read for row in rows for read in row]
                     self.draw_sashimi_track(
-                        axes_by_track[names["sashimi"]], sashimi_reads, start, end
+                        axes_by_track[names["sashimi"]], sashimi_reads, start, end,
+                        chrom=chrom, reference=reference,
+                        genomic_tracks=locus.get("genomic_tracks", []),
                     )
                 if self.show_alignments:
                     alignment_ax = axes_by_track[names["alignments"]]
@@ -3732,3 +3901,30 @@ class AlignmentRenderer:
                     (sort_position, y0), 1, h,
                     facecolor=self.base_colors[observed], edgecolor="none", zorder=8,
                 ))
+
+        if self.molecule_mode and not squished:
+            family_size = getattr(read, "molecule_family_size", 1)
+            duplicate_reads = getattr(read, "molecule_duplicate_reads", 0)
+            is_duplex = getattr(read, "molecule_is_duplex", False)
+            if family_size > 1 or duplicate_reads or is_duplex:
+                parts = [f"{family_size}×"]
+                if duplicate_reads:
+                    parts.append(f"dup{duplicate_reads}")
+                if is_duplex:
+                    parts.append("duplex")
+                label = " · ".join(parts)
+                read_width_px = max(read.ref_end - read.ref_start, 1) * pixels_per_base
+                if read_width_px >= self.styles["molecule_label_min_px"]:
+                    x = (read.ref_start + read.ref_end) / 2
+                    horizontal_alignment = "center"
+                    color = self.visual_colors["contrast_edge"]
+                else:
+                    x = read.ref_end + max(axis_span * 0.002, 0.5)
+                    horizontal_alignment = "left"
+                    color = self.visual_colors["secondary_text"]
+                ax.text(
+                    x, y0 + h / 2, label,
+                    ha=horizontal_alignment, va="center",
+                    fontsize=self.styles["molecule_label_size"],
+                    color=color, fontweight="bold", clip_on=True, zorder=11,
+                )

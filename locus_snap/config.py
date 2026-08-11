@@ -63,6 +63,10 @@ DEFAULT_VISUAL_COLORS = {
     "sashimi_combined": "#24557f",
     "sashimi_plus": "#24557f",
     "sashimi_minus": "#8b3f73",
+    "junction_annotated": "#24557f",
+    "junction_novel": "#e6862d",
+    "junction_noncanonical": "#a50f15",
+    "fusion_split": "#7a1f5c",
 }
 DEFAULT_HAPLOTYPE_COLORS = {
     "1": "#3b6fb6", "2": "#e6862d", "untagged": "#9b9b96",
@@ -80,6 +84,11 @@ DEFAULT_MODIFICATION_COLORS = {
     "5hmC": "#2c7fb8",
     "6mA": "#e6862d",
     "other": "#555555",
+}
+DEFAULT_MOLECULE_COLORS = {
+    "singleton": "#a8a8a8",
+    "consensus": "#4c78a8",
+    "duplex": "#a50f15",
 }
 DEFAULT_CYTOBAND_COLORS = {
     "gneg": "#ffffff", "gpos25": "#c8c8c8", "gpos50": "#969696",
@@ -140,6 +149,8 @@ DEFAULT_STYLES = {
     "modification_read_marker_size": 9.0,
     "modification_letter_min_px": 8.0,
     "modification_letter_size": 4.0,
+    "molecule_label_min_px": 22.0,
+    "molecule_label_size": 5.2,
     "coverage_bins_per_pixel": 1.00,
     "reference_base_alpha": 0.20,
     "softclip_base_letter_min_px": 8.0,
@@ -204,6 +215,10 @@ DEFAULT_STYLES = {
     "sashimi_max_line_width": 4.00,
     "sashimi_arc_height": 0.78,
     "sashimi_label_size": 6.00,
+    "fusion_arc_alpha": 0.88,
+    "fusion_line_width": 1.10,
+    "fusion_marker_size": 17.0,
+    "fusion_label_size": 5.7,
 }
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -215,6 +230,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "tag_colors": DEFAULT_TAG_COLORS,
     "long_read_colors": DEFAULT_LONG_READ_COLORS,
     "modification_colors": DEFAULT_MODIFICATION_COLORS,
+    "molecule_colors": DEFAULT_MOLECULE_COLORS,
     "cytoband_colors": DEFAULT_CYTOBAND_COLORS,
     "chromosome_colors": DEFAULT_CHROMOSOME_COLORS,
     "chromosome_palette": DEFAULT_CHROMOSOME_PALETTE,
@@ -226,6 +242,7 @@ CONFIG_SECTIONS = set(DEFAULT_CONFIG)
 COLOR_SECTIONS = (
     "alignment_colors", "base_colors", "track_colors", "visual_colors",
     "haplotype_colors", "tag_colors", "long_read_colors", "modification_colors",
+    "molecule_colors",
     "cytoband_colors", "chromosome_colors",
 )
 ALPHA_STYLE_KEYS = {
@@ -233,7 +250,7 @@ ALPHA_STYLE_KEYS = {
     "coverage_alpha", "reference_base_alpha", "cnv_fill_alpha", "baf_alpha",
     "peak_fill_alpha", "signal_fill_alpha", "density_fill_alpha",
     "tad_fill_alpha", "tad_boundary_alpha", "hic_loop_alpha", "hic_anchor_alpha",
-    "hic_contact_map_alpha",
+    "hic_contact_map_alpha", "fusion_arc_alpha",
     "haplotype_lane_alpha", "tag_lane_alpha",
     "center_guide_alpha",
     "breakpoint_link_alpha",

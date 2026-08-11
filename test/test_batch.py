@@ -151,6 +151,23 @@ def test_write_html_report_groups_multiple_samples_and_shows_deltas(tmp_path):
     assert "baseline" in content
 
 
+def test_write_html_report_uses_molecule_units_when_requested(tmp_path):
+    image_path = tmp_path / "molecules.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-bytes")
+    result = BatchResult(
+        region=BatchRegion(chrom="chr1", start=99, end=100, name="umi_locus"),
+        output_path=str(image_path), summary=_summary(n_reads=7),
+        unit="molecules",
+    )
+    report_path = tmp_path / "molecules.html"
+
+    write_html_report([result], str(report_path), "png")
+    content = report_path.read_text(encoding="utf-8")
+
+    assert "<th>Molecules</th>" in content
+    assert "7 molecules" in content
+
+
 def test_write_html_report_rejects_non_browser_format(tmp_path):
     results = [BatchResult(region=BatchRegion(chrom="chr1", start=0, end=100, name="r"))]
     with pytest.raises(ValueError, match="browser-viewable"):

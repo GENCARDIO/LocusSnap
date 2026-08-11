@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from locus_snap.annotations import AnnotationItem, LoadedAnnotationTrack
 from locus_snap.config import DEFAULT_BASE_COLORS, DEFAULT_VISUAL_COLORS, load_config
 from locus_snap.cytobands import Cytoband
-from locus_snap.read_model import BaseModification, CigarBlock
+from locus_snap.read_model import BaseModification, CigarBlock, SAEntry
 from locus_snap.render import (
     AlignmentRenderer,
     HighlightRegion,
@@ -1150,6 +1150,68 @@ def test_sashimi_draws_supported_count_labelled_arcs():
         labels.add(text.get_text())
     assert {"splice junctions", "+2", "-1"}.issubset(labels)
     assert ax.get_ylim() == pytest.approx((-1.05, 1.05))
+    plt.close(fig)
+
+
+def test_rna_junction_track_distinguishes_annotated_and_novel_arcs():
+    reads = [
+        SimpleNamespace(
+            query_name="known", strand="+", is_read2=False,
+            blocks=[
+                CigarBlock("M", 100, 0, 20), CigarBlock("N", 120, 20, 80),
+                CigarBlock("M", 200, 20, 20),
+            ], deletions=[(120, 80, True)],
+        ),
+        SimpleNamespace(
+            query_name="novel", strand="+", is_read2=False,
+            blocks=[
+                CigarBlock("M", 110, 0, 20), CigarBlock("N", 130, 20, 80),
+                CigarBlock("M", 210, 20, 20),
+            ], deletions=[(130, 80, True)],
+        ),
+    ]
+    transcript = AnnotationItem(
+        90, 230, "TX", "+", blocks=[(90, 120), (200, 230)]
+    )
+    track = LoadedAnnotationTrack(
+        "Genes", "gtf", "#17217a", [transcript], [[transcript]], chrom="chr1"
+    )
+    renderer = AlignmentRenderer(
+        show_sashimi=True, junction_labels="status", shade_by_mapq=False
+    )
+    fig, ax = plt.subplots()
+
+    renderer.draw_sashimi_track(
+        ax, reads, 90, 240, chrom="chr1", genomic_tracks=[track]
+    )
+
+    colors = {to_hex(patch.get_edgecolor()) for patch in ax.patches}
+    labels = {text.get_text() for text in ax.texts}
+    assert DEFAULT_VISUAL_COLORS["junction_annotated"] in colors
+    assert DEFAULT_VISUAL_COLORS["junction_novel"] in colors
+    assert {"1 K", "1 N"}.issubset(labels)
+    plt.close(fig)
+
+
+def test_rna_fusion_track_labels_split_and_pair_support():
+    read = SimpleNamespace(
+        query_name="fusion", ref_start=100, ref_end=150, strand="+",
+        is_reverse=False, is_read2=False, mapq=60,
+        soft_clip_left=0, soft_clip_right=50,
+        hard_clip_left=0, hard_clip_right=0,
+        sa_entries=[SAEntry("chr2", 500, 550, "+", "50S50M", 60, 0)],
+        mate_chrom=None, mate_start=None, mate_is_unmapped=True,
+    )
+    renderer = AlignmentRenderer(
+        show_fusions=True, min_fusion_reads=1, shade_by_mapq=False
+    )
+    fig, ax = plt.subplots()
+
+    renderer.draw_sashimi_track(ax, [read], 80, 180, chrom="chr1")
+
+    assert len(ax.patches) == 1
+    assert any("chr1:151 → chr2:501 · S1/P0" == text.get_text() for text in ax.texts)
+    assert to_hex(ax.patches[0].get_edgecolor()) == DEFAULT_VISUAL_COLORS["fusion_split"]
     plt.close(fig)
 
 

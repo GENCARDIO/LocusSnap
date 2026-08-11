@@ -70,9 +70,9 @@ full-resolution figure.
       <sub>Ideogram, RefSeq isoforms, coverage, alignments, and grouped legend.</sub>
     </td>
     <td width="50%">
-      <a href="out/24_rnaseq_sashimi.png"><img src="out/24_rnaseq_sashimi.png" alt="MET exon 14 splice-site variant with RNA-seq and sashimi evidence"></a><br>
-      <strong>MET exon 14 skipping</strong><br>
-      <sub>Splice-site VCF, gene model, RNA-seq coverage, sashimi arcs, and split reads.</sub>
+      <a href="out/41_rnaseq_junction_fusion.png"><img src="out/41_rnaseq_junction_fusion.png" alt="Two-locus RNA-seq view with annotated and novel splice junctions plus reciprocal fusion evidence"></a><br>
+      <strong>RNA junctions and gene fusion</strong><br>
+      <sub>Annotated/novel splice motifs, exon skipping, SA split reads, and spanning-pair fusion support.</sub>
     </td>
   </tr>
   <tr>
@@ -82,9 +82,9 @@ full-resolution figure.
       <sub>Independently scaled loci align reciprocal pairs, split reads, soft clips, coverage, and VCF breakends.</sub>
     </td>
     <td width="50%">
-      <a href="out/16_coverage_snv_vaf.png"><img src="out/16_coverage_snv_vaf.png" alt="Coverage track with SNV variant allele fractions"></a><br>
-      <strong>SNV allele fractions</strong><br>
-      <sub>Coverage with strand-aware alternative-allele evidence and VAF labels.</sub>
+      <a href="out/40_molecule_consensus.png"><img src="out/40_molecule_consensus.png" alt="UMI families collapsed into coloured consensus molecules with molecule-level coverage and VAF"></a><br>
+      <strong>UMI molecule consensus</strong><br>
+      <sub>PCR families collapse to one consensus unit for layout, coverage, and allele fractions.</sub>
     </td>
   </tr>
   <tr>
@@ -126,9 +126,11 @@ full-resolution figure.
 </table>
 
 The synthetic examples use expanded, deterministic datasets: 240 tumour, 180
-normal, 210 relapse, 300 METex14 RNA alignments, 703 structural-variant
+normal, 210 relapse, 300 METex14 RNA alignments, 101 junction/fusion RNA
+alignments, 703 structural-variant
 alignments, and 16,000 reads across a purity-aware CNV locus; 12 general VCF
-records; 83 heterozygous BAF loci; 12 H3K27ac, 7 H3K27me3, and 24 DNase peaks;
+records; 26 positional UMI families; 83 heterozygous BAF loci; 12 H3K27ac,
+7 H3K27me3, and 24 DNase peaks;
 and three 4 kb normalized CTCF signal profiles. DNA cohorts include a sparse
 0.15% low-quality substitution-error model. The CNV cohort couples read depth,
 SEG log2 ratios, and BAF bands for diploid, single-copy-loss/LOH, and three-copy
@@ -172,6 +174,8 @@ possible.
 | Very deep region | `--display_mode squish --layout pack` |
 | Overlay everything | `--display_mode collapse` |
 | One sorted read per row | `--layout expand --sort_by gap_length` |
+| Count positional UMI families | `--molecule_mode --molecule_tag auto` |
+| Classify RNA junctions and fusions | `--rna_mode --junction_labels full` |
 | Link visible mates | `--view_as_pairs` |
 | Two loci: region + inferred mate locus | `--mate_view` |
 | Only event-supporting reads | `--only discordant gapped split softclip` |
@@ -375,6 +379,41 @@ entries and summarizes additional high-cardinality values, so tags such as
 barcodes or categories should be shown. Generic tag views and
 `--haplotype_view` are mutually exclusive because both control read colour.
 
+### UMI molecule consensus
+
+Collapse PCR-family alignments into one positional molecule before layout,
+coverage, VAF, summaries, or TSV export:
+
+```bash
+locus-snap \
+  --bam umi-tagged.bam \
+  --fasta reference.fa \
+  --region chr1:100001-100200 \
+  --molecule_mode \
+  --molecule_tag auto \
+  --min_family_size 2 \
+  --molecule_position_tolerance 2 \
+  --molecule_consensus_fraction 0.60 \
+  --output_name molecule-consensus
+```
+
+`auto` selects the best-covered standard molecule tag in `MI`, `RX`, and
+`UB` order; choose one explicitly when the BAM carries several. Families are
+separated by tag value, optional `CB` cell barcode, chromosome, read side, and
+similar alignment start/end coordinates. This prevents a reused UMI in a
+different cell or distant fragment from being merged. Duplicate-flagged reads
+are retained automatically inside molecule families, then each family is
+replaced by a quality-aware majority consensus. `--min_family_size 1` keeps
+true singletons; use `2` or more to require replicated evidence.
+
+The read label reports family size (`4×`), duplicate members (`dup3`), and
+duplex status when both alignment strands support a family. Grey denotes a
+singleton, blue a multi-read consensus, and dark red a duplex family. Coverage
+and alternative-allele counts are molecule-level, so PCR amplification cannot
+inflate depth or VAF. Molecule mode currently does not combine with paired,
+mate-window, long-read, MM/ML base-modification, haplotype-colour, or generic
+tag-colour/group views.
+
 ### Long-read mode and base modifications
 
 Use the ONT/PacBio preset on a BAM carrying standard `MM`/`ML` tags:
@@ -402,7 +441,9 @@ colours. Repeat `--modification_code` to restrict the view; SAM codes (`m`,
 accepted. `--long_read_mode` defaults to squish display unless an explicit CLI
 or YAML `display_mode` is supplied.
 
-### RNA-seq sashimi view
+### RNA-seq junction and fusion analysis
+
+The original sashimi view remains available for a simple count-only plot:
 
 ```bash
 locus-snap \
@@ -417,6 +458,46 @@ locus-snap \
 
 Junctions come from CIGAR `N` operations. Arc labels are supporting-read
 counts. `combined` merges strands; `split` mirrors plus and minus junctions.
+
+For richer RNA review, enable the RNA preset. It combines the sashimi track
+with candidate fusion evidence from `SA` split alignments and distant or
+inter-chromosomal mates:
+
+```bash
+locus-snap \
+  --bam tumour-rna.bam \
+  --fasta reference.fa \
+  --region chr2:42490000-42530000 \
+  --track transcripts.gtf.gz \
+  --rna_mode \
+  --min_junction_reads 3 \
+  --min_junction_anchor 12 \
+  --sashimi_strand split \
+  --rna_strandness reverse \
+  --junction_labels full \
+  --min_fusion_reads 3 \
+  --fusion_breakpoint_tolerance 10 \
+  --fusion_min_distance 100000 \
+  --rna_evidence_tsv rna-evidence.tsv \
+  --output_name rna-evidence
+```
+
+Junction support is deduplicated by query name. `--min_junction_anchor`
+requires matched sequence on both sides of the intron, helping suppress
+short-anchor alignments. Visible BED12/GFF/GTF transcript models classify
+exact exon boundaries as annotated (`K`, solid blue); unmatched boundaries
+are novel (`N`, dashed orange). With FASTA, `--junction_labels full` also
+reports strand-oriented motifs such as `GT-AG`, `GC-AG`, or `AT-AC` and marks
+non-canonical motifs in dark red.
+
+`--rna_strandness forward|reverse` normalizes paired-end read orientation to
+the inferred transcript strand; `alignment` preserves raw BAM orientation and
+is the backward-compatible default. Fusion arcs cluster nearby local and
+partner breakpoints, deduplicate query names, and label split/spanning support
+as `S#/P#`. Same-chromosome chimeras closer than `--fusion_min_distance` are
+ignored. Use `--rna_fusions` instead of `--rna_mode` when only fusion evidence
+is wanted. The optional TSV contains stable one-row summaries for both
+junctions and fusion candidates and currently supports one BAM and one region.
 
 ### Stack several BAMs and matched VCFs
 
@@ -948,10 +1029,22 @@ CIGAR insertion and deletion lengths are hidden by default. Show them with
 | `--color_by_tag TAG` | colour reads by a BAM tag without changing row placement |
 | `--tag_filter VALUE [...]` | retain selected tag values, including `untagged` |
 | `--tag_color VALUE=COLOR` | override a tag value colour; repeatable |
+| `--molecule_mode` | collapse positional MI/RX/UB families into consensus molecules |
+| `--molecule_tag TAG` | use `auto`, `MI`, `RX`, or `UB` as the molecule identifier |
+| `--min_family_size N` | require at least N alignments in a molecule family |
+| `--molecule_position_tolerance BP` | allowed start/end difference within a family |
+| `--molecule_consensus_fraction F` | minimum majority fraction for a consensus call |
 | `--long_read_mode` | strand-aware long-read display with automatic MM/ML support |
 | `--base_modifications` | show MM/ML calls without changing ordinary read colours |
 | `--modification_code CODE` | retain one modification type; repeatable |
 | `--min_mod_probability F` | confidence threshold for read markers and fractions |
+| `--rna_mode` | show classified splice junctions and clustered fusion evidence |
+| `--rna_fusions` | show fusion candidates without enabling splice-junction arcs |
+| `--min_junction_anchor BP` | require matched bases on both sides of a junction |
+| `--rna_strandness MODE` | infer transcript strand from the RNA library orientation |
+| `--junction_labels MODE` | show count, annotation status, or status plus motif |
+| `--min_fusion_reads N` | minimum unique split/spanning support for a fusion |
+| `--rna_evidence_tsv PATH` | export junction and fusion summaries for one locus |
 | `--track PATH` | add a genomic track; repeatable |
 | `--custom_track SPEC` | add a named, coloured, sized track |
 | `--plugin_track PLUGIN KEY=VALUE ...` | add an installed API-v1 track plugin or `module:object` target |

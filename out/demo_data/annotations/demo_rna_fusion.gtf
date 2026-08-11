@@ -1,0 +1,9 @@
+chrRNA1	demo	gene	501	1450	.	+	.	gene_id "GENEA"; gene_name "GENEA";
+chrRNA1	demo	transcript	501	1450	.	+	.	gene_id "GENEA"; gene_name "GENEA"; transcript_id "TXA"; transcript_name "TXA";
+chrRNA1	demo	exon	501	650	.	+	.	gene_id "GENEA"; gene_name "GENEA"; transcript_id "TXA"; transcript_name "TXA"; exon_number "1";
+chrRNA1	demo	exon	901	1050	.	+	.	gene_id "GENEA"; gene_name "GENEA"; transcript_id "TXA"; transcript_name "TXA"; exon_number "2";
+chrRNA1	demo	exon	1301	1450	.	+	.	gene_id "GENEA"; gene_name "GENEA"; transcript_id "TXA"; transcript_name "TXA"; exon_number "3";
+chrRNA2	demo	gene	2501	3050	.	-	.	gene_id "GENEB"; gene_name "GENEB";
+chrRNA2	demo	transcript	2501	3050	.	-	.	gene_id "GENEB"; gene_name "GENEB"; transcript_id "TXB"; transcript_name "TXB";
+chrRNA2	demo	exon	2501	2650	.	-	.	gene_id "GENEB"; gene_name "GENEB"; transcript_id "TXB"; transcript_name "TXB"; exon_number "1";
+chrRNA2	demo	exon	2901	3050	.	-	.	gene_id "GENEB"; gene_name "GENEB"; transcript_id "TXB"; transcript_name "TXB"; exon_number "2";

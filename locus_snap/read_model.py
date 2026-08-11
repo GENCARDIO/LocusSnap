@@ -263,7 +263,10 @@ class AlignedRead:
         self.is_secondary = seg.is_secondary
         self.is_supplementary = seg.is_supplementary
         self.is_paired = seg.is_paired
+        self.is_read1 = bool(seg.is_paired and seg.is_read1)
+        self.is_read2 = bool(seg.is_paired and seg.is_read2)
         self.mate_is_unmapped = bool(seg.is_paired and seg.mate_is_unmapped)
+        self.mate_is_reverse = bool(seg.is_paired and seg.mate_is_reverse)
         self.is_proper_pair = bool(seg.is_paired and seg.is_proper_pair)
         self.insert_size = abs(seg.template_length) if seg.is_paired else 0
         self.flag = seg.flag
@@ -273,6 +276,20 @@ class AlignedRead:
         self.tag_value = (
             str(seg.get_tag(read_tag)) if read_tag and seg.has_tag(read_tag) else None
         )
+        self.molecule_tags = {
+            tag: str(seg.get_tag(tag))
+            for tag in ("MI", "RX", "UB", "CB")
+            if seg.has_tag(tag)
+        }
+        self.molecule_tag: Optional[str] = None
+        self.molecule_id: Optional[str] = None
+        self.molecule_family_size = 1
+        self.molecule_duplicate_reads = int(seg.is_duplicate)
+        self.molecule_member_names = (self.query_name,)
+        self.molecule_is_duplex = False
+        self.molecule_consensus_fraction = 1.0
+        self.consensus_bases: Optional[dict[int, str]] = None
+        self.consensus_qualities: dict[int, int] = {}
 
         # --- pair orientation / discordance (see compute_pair_orientation) ---
         has_mapped_mate = seg.is_paired and not seg.mate_is_unmapped
@@ -401,6 +418,8 @@ class AlignedRead:
 
     def base_at(self, ref_position: int) -> Optional[str]:
         """Return the aligned base, deletion, skip, or no-call at a locus."""
+        if self.consensus_bases is not None:
+            return self.consensus_bases.get(ref_position)
         sequence = self.query_sequence or ""
         for block in self.blocks:
             block_end = block.ref_pos + block.length
