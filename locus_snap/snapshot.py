@@ -119,6 +119,7 @@ class BamSnapshot:
         min_junction_anchor: int = 0,
         rna_strandness: str = "alignment",
         junction_labels: str = "count",
+        rna_sample_indices: Optional[List[int]] = None,
         show_fusions: bool = False,
         min_fusion_reads: int = 2,
         fusion_breakpoint_tolerance: int = 10,
@@ -133,6 +134,7 @@ class BamSnapshot:
         min_variant_mapq: int = 0,
         show_variant_counts: bool = False,
         show_indel_lengths: bool = False,
+        show_exon_numbers: bool = False,
         haplotype_view: str = "none",
         haplotype_filter: Optional[List[str]] = None,
         haplotype_tag: str = "HP",
@@ -211,6 +213,9 @@ class BamSnapshot:
         self.min_junction_anchor = min_junction_anchor
         self.rna_strandness = rna_strandness
         self.junction_labels = junction_labels
+        self.rna_sample_indices = list(rna_sample_indices or [])
+        if any(index != 1 for index in self.rna_sample_indices):
+            raise ValueError("A single-BAM snapshot only accepts RNA sample index 1.")
         self.show_fusions = show_fusions
         self.min_fusion_reads = min_fusion_reads
         self.fusion_breakpoint_tolerance = fusion_breakpoint_tolerance
@@ -225,6 +230,7 @@ class BamSnapshot:
         self.min_variant_mapq = min_variant_mapq
         self.show_variant_counts = show_variant_counts
         self.show_indel_lengths = show_indel_lengths
+        self.show_exon_numbers = show_exon_numbers
         self.haplotype_view = haplotype_view
         self.haplotype_filter = list(haplotype_filter or [])
         self.haplotype_tag = haplotype_tag
@@ -397,6 +403,7 @@ class BamSnapshot:
             min_variant_mapq=self.min_variant_mapq,
             show_variant_counts=self.show_variant_counts,
             show_indel_lengths=self.show_indel_lengths,
+            show_exon_numbers=self.show_exon_numbers,
             haplotype_view=self.haplotype_view,
             read_tag=self.read_tag,
             tag_view=self.tag_view,
@@ -405,13 +412,19 @@ class BamSnapshot:
             sort_base_position=base_position if self.sort_by == "base" else None,
             sort_reference_base=reference_base,
             show_center_guide=self.show_center_guide,
-            show_sashimi=self.show_sashimi,
+            show_sashimi=(
+                self.show_sashimi
+                and (not self.rna_sample_indices or 1 in self.rna_sample_indices)
+            ),
             min_junction_reads=self.min_junction_reads,
             sashimi_strand=self.sashimi_strand,
             min_junction_anchor=self.min_junction_anchor,
             rna_strandness=self.rna_strandness,
             junction_labels=self.junction_labels,
-            show_fusions=self.show_fusions,
+            show_fusions=(
+                self.show_fusions
+                and (not self.rna_sample_indices or 1 in self.rna_sample_indices)
+            ),
             min_fusion_reads=self.min_fusion_reads,
             fusion_breakpoint_tolerance=self.fusion_breakpoint_tolerance,
             fusion_min_distance=self.fusion_min_distance,
@@ -632,6 +645,7 @@ def render_multi_locus_snapshots(
     min_junction_anchor: int = 0,
     rna_strandness: str = "alignment",
     junction_labels: str = "count",
+    rna_sample_indices: Optional[List[int]] = None,
     show_fusions: bool = False,
     min_fusion_reads: int = 2,
     fusion_breakpoint_tolerance: int = 10,
@@ -646,6 +660,7 @@ def render_multi_locus_snapshots(
     min_variant_mapq: int = 0,
     show_variant_counts: bool = False,
     show_indel_lengths: bool = False,
+    show_exon_numbers: bool = False,
     haplotype_view: str = "none",
     haplotype_filter: Optional[List[str]] = None,
     haplotype_tag: str = "HP",
@@ -693,6 +708,9 @@ def render_multi_locus_snapshots(
         raise ValueError("More sample labels were supplied than BAMs.")
     while len(labels) < len(bam_paths):
         labels.append(Path(bam_paths[len(labels)]).stem)
+    selected_rna_samples = set(rna_sample_indices or [])
+    if any(index < 1 or index > len(bam_paths) for index in selected_rna_samples):
+        raise ValueError("RNA sample indices must identify an available BAM panel.")
 
     locus_labels = list(region_labels or [])
     if len(locus_labels) > len(regions):
@@ -816,6 +834,9 @@ def render_multi_locus_snapshots(
                 "sort_base_position": base_position,
                 "sort_reference_base": sample_reference_base,
                 "companion_tracks": companion_tracks,
+                "show_rna_evidence": (
+                    not selected_rna_samples or sample_index + 1 in selected_rna_samples
+                ),
             })
         loci.append({
             "label": locus_labels[locus_index],
@@ -849,6 +870,7 @@ def render_multi_locus_snapshots(
         min_variant_mapq=min_variant_mapq,
         show_variant_counts=show_variant_counts,
         show_indel_lengths=show_indel_lengths,
+        show_exon_numbers=show_exon_numbers,
         haplotype_view=haplotype_view,
         read_tag=read_tag, tag_view=tag_view, tag_label=tag_label,
         tag_colors=tag_colors,
@@ -929,6 +951,7 @@ def compare_snapshots(
     min_junction_anchor: int = 0,
     rna_strandness: str = "alignment",
     junction_labels: str = "count",
+    rna_sample_indices: Optional[List[int]] = None,
     show_fusions: bool = False,
     min_fusion_reads: int = 2,
     fusion_breakpoint_tolerance: int = 10,
@@ -943,6 +966,7 @@ def compare_snapshots(
     min_variant_mapq: int = 0,
     show_variant_counts: bool = False,
     show_indel_lengths: bool = False,
+    show_exon_numbers: bool = False,
     haplotype_view: str = "none",
     haplotype_filter: Optional[List[str]] = None,
     haplotype_tag: str = "HP",
@@ -995,6 +1019,9 @@ def compare_snapshots(
     for index, bam_path in enumerate(bam_paths[2:]):
         label = extra_labels[index] if index < len(extra_labels) else None
         labels.append(label or Path(bam_path).stem)
+    selected_rna_samples = set(rna_sample_indices or [])
+    if any(index < 1 or index > len(bam_paths) for index in selected_rna_samples):
+        raise ValueError("RNA sample indices must identify an available BAM panel.")
     tsv_paths = [metrics_tsv_1, metrics_tsv_2]
     while len(tsv_paths) < len(bam_paths):
         tsv_paths.append(None)
@@ -1103,6 +1130,9 @@ def compare_snapshots(
             "dropped_reads": dropped,
             "downsampled_reads": downsampled,
             "companion_tracks": companion_tracks,
+            "show_rna_evidence": (
+                not selected_rna_samples or panel_index + 1 in selected_rna_samples
+            ),
         })
 
     out_path = resolve_output_path(
@@ -1128,6 +1158,7 @@ def compare_snapshots(
         min_variant_mapq=min_variant_mapq,
         show_variant_counts=show_variant_counts,
         show_indel_lengths=show_indel_lengths,
+        show_exon_numbers=show_exon_numbers,
         haplotype_view=haplotype_view,
         read_tag=read_tag,
         tag_view=tag_view,

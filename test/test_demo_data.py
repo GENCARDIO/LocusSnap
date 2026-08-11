@@ -4,14 +4,18 @@ import pysam
 import pytest
 
 from generate_demo_data import (
+    ALK_DNA_BREAKPOINT,
     CNV_LENGTH,
     CNV_SEGMENTS,
     CNV_TUMOUR_PURITY,
+    EML4_DNA_BREAKPOINT,
     add_sequencing_errors,
     build_cnv_variant_sites,
+    write_eml4_alk_dna_bam,
     write_rna_fusion_bam,
     write_rna_fusion_reference,
 )
+from locus_snap.read_model import compute_pair_orientation
 
 
 def test_copy_number_model_links_depth_log2_and_baf_to_state():
@@ -57,16 +61,33 @@ def test_error_model_changes_bases_and_marks_them_low_quality():
     assert qualities == [12] * len(sequence)
 
 
-def test_rna_demo_contains_junction_split_and_spanning_fusion_evidence(tmp_path):
+def test_eml4_alk_demo_contains_rna_fusion_and_dna_inversion_evidence(tmp_path):
     reference_path = tmp_path / "rna.fa"
-    bam_path = tmp_path / "rna.bam"
+    rna_bam_path = tmp_path / "rna.bam"
+    dna_bam_path = tmp_path / "dna.bam"
     references = write_rna_fusion_reference(reference_path)
-    write_rna_fusion_bam(bam_path, references)
+    write_rna_fusion_bam(rna_bam_path, references)
+    write_eml4_alk_dna_bam(dna_bam_path, references)
 
-    with pysam.AlignmentFile(str(bam_path), "rb") as bam:
-        reads = list(bam.fetch(until_eof=True))
+    with pysam.AlignmentFile(str(rna_bam_path), "rb") as bam:
+        rna_reads = list(bam.fetch(until_eof=True))
 
-    assert len(reads) == 101
-    assert sum(any(op == 3 for op, _ in read.cigartuples or []) for read in reads) == 69
-    assert sum(read.has_tag("SA") for read in reads) == 20
-    assert sum(read.is_paired for read in reads) == 12
+    assert len(rna_reads) == 150
+    assert sum(any(op == 3 for op, _ in read.cigartuples or []) for read in rna_reads) == 94
+    assert sum(read.has_tag("SA") for read in rna_reads) == 36
+    assert sum(read.is_paired for read in rna_reads) == 20
+    assert all(read.reference_name == "chr2" for read in rna_reads)
+    assert sum("EML4e13_ALKe20" in read.query_name for read in rna_reads) == 56
+
+    with pysam.AlignmentFile(str(dna_bam_path), "rb") as bam:
+        dna_reads = list(bam.fetch(until_eof=True))
+
+    assert len(dna_reads) == 582
+    assert sum(read.has_tag("SA") for read in dna_reads) == 20
+    orientations = {
+        compute_pair_orientation(read)
+        for read in dna_reads
+        if read.is_paired and not read.is_proper_pair
+    }
+    assert {"FF", "RR"} <= orientations
+    assert EML4_DNA_BREAKPOINT - ALK_DNA_BREAKPOINT == 13_075_342

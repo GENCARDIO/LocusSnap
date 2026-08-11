@@ -21,7 +21,7 @@ VARIANTS_DIR = DEMO_DATA_DIR / "variants"
 REFERENCE_PATH = REFERENCE_DIR / "demo_reference.fa"
 CNV_REFERENCE_PATH = REFERENCE_DIR / "demo_cnv_reference.fa"
 LONG_REFERENCE_PATH = REFERENCE_DIR / "demo_long_reference.fa"
-RNA_REFERENCE_PATH = REFERENCE_DIR / "demo_rna_fusion_reference.fa"
+RNA_REFERENCE_PATH = REFERENCE_DIR / "demo_rna_fusion_reference.fa.gz"
 
 CNV_CHROM = "chrCNV"
 CNV_LENGTH = 80_000
@@ -31,8 +31,23 @@ CNV_TUMOUR_PURITY = 0.75
 SEQUENCING_ERROR_RATE = 0.0015
 LONG_CHROM = "chrLong"
 LONG_LENGTH = 12_000
-RNA_CHROMS = ("chrRNA1", "chrRNA2")
-RNA_LENGTH = 5_000
+RNA_CHROMS = ("chr2",)
+# The reference only needs to extend beyond EML4 for fetching sequence, while
+# BAM headers retain the GRCh37 chromosome-2 length so the ideogram is honest.
+RNA_LENGTH = 42_530_000
+GRCH37_CHR2_LENGTH = 243_199_373
+EML4_DNA_BREAKPOINT = 42_523_383
+ALK_DNA_BREAKPOINT = 29_448_041
+EML4_EXONS = {
+    12: (42_518_200, 42_518_320),
+    13: (42_522_264, 42_522_399),
+    14: (42_524_430, 42_524_560),
+}
+ALK_EXONS = {
+    21: (29_445_100, 29_445_220),
+    20: (29_446_205, 29_446_396),
+    19: (29_448_324, 29_448_433),
+}
 
 
 @dataclass(frozen=True)
@@ -338,44 +353,55 @@ def write_long_reference(path: Path) -> str:
 
 
 def write_rna_fusion_reference(path: Path) -> dict[str, str]:
-    """Write two small contigs with canonical splice motifs for RNA examples."""
+    """Write a compact GRCh37-like chr2 reference for the EML4::ALK demo."""
+    pattern = b"ACGTTGCAAGTCGATCGGATCCATGCTA"
+    sequence = bytearray((pattern * (RNA_LENGTH // len(pattern) + 1))[:RNA_LENGTH])
+
+    # Make the visible windows locally non-repetitive without constructing a
+    # chromosome-sized list of Python strings.
     rng = Random(24_003)
-    sequences = {
-        chrom: list(rng.choices("ACGT", weights=(29, 21, 21, 29), k=RNA_LENGTH))
-        for chrom in RNA_CHROMS
-    }
-    # Positive-strand donor/acceptor motifs for GENEA annotated and skipped junctions.
-    for donor in (650, 1050):
-        sequences["chrRNA1"][donor:donor + 2] = list("GT")
-    for acceptor in (900, 1300):
-        sequences["chrRNA1"][acceptor - 2:acceptor] = list("AG")
-    # Negative-strand GT-AG junction: genomic acceptor AC, genomic donor CT.
-    sequences["chrRNA2"][2650:2652] = list("CT")
-    sequences["chrRNA2"][2898:2900] = list("AC")
-    with path.open("w", encoding="utf-8") as handle:
-        for chrom in RNA_CHROMS:
-            sequence = "".join(sequences[chrom])
-            handle.write(f">{chrom}\n")
-            for offset in range(0, len(sequence), 80):
-                handle.write(sequence[offset:offset + 80] + "\n")
-            sequences[chrom] = sequence
-    index_path = Path(f"{path}.fai")
-    if index_path.exists():
-        index_path.unlink()
+    for start, end in (
+        (ALK_EXONS[21][0] - 1_000, ALK_EXONS[19][1] + 1_000),
+        (EML4_EXONS[12][0] - 1_000, EML4_EXONS[14][1] + 1_000),
+    ):
+        sequence[start:end] = bytes(
+            ord(base) for base in rng.choices("ACGT", weights=(29, 21, 21, 29), k=end - start)
+        )
+
+    # Canonical splice motifs. EML4 is on +; ALK is on the reverse strand, so
+    # a transcript-oriented GT-AG intron appears as genomic CT...AC.
+    sequence[EML4_EXONS[12][1]:EML4_EXONS[12][1] + 2] = b"GT"
+    sequence[EML4_EXONS[13][0] - 2:EML4_EXONS[13][0]] = b"AG"
+    sequence[EML4_EXONS[13][1]:EML4_EXONS[13][1] + 2] = b"GT"
+    sequence[EML4_EXONS[14][0] - 2:EML4_EXONS[14][0]] = b"AG"
+    for lower_exon, upper_exon in ((21, 20), (20, 19)):
+        sequence[ALK_EXONS[lower_exon][1]:ALK_EXONS[lower_exon][1] + 2] = b"CT"
+        sequence[ALK_EXONS[upper_exon][0] - 2:ALK_EXONS[upper_exon][0]] = b"AC"
+
+    reference = sequence.decode("ascii")
+    with pysam.BGZFile(str(path), "w") as handle:
+        handle.write(b">chr2\n")
+        for offset in range(0, len(reference), 80):
+            handle.write((reference[offset:offset + 80] + "\n").encode("ascii"))
+    for suffix in (".fai", ".gzi"):
+        index_path = Path(f"{path}{suffix}")
+        if index_path.exists():
+            index_path.unlink()
     pysam.faidx(str(path))
-    return sequences
+    return {"chr2": reference}
 
 
 def write_rna_fusion_gtf(path: Path) -> None:
     genes = (
-        ("chrRNA1", "+", "GENEA", "TXA", ((500, 650), (900, 1050), (1300, 1450))),
-        ("chrRNA2", "-", "GENEB", "TXB", ((2500, 2650), (2900, 3050))),
+        ("+", "EML4", "EML4-201", EML4_EXONS),
+        ("-", "ALK", "ALK-201", ALK_EXONS),
     )
     with path.open("w", encoding="utf-8") as handle:
-        for chrom, strand, gene, transcript, exons in genes:
+        for strand, gene, transcript, numbered_exons in genes:
+            exons = sorted(numbered_exons.values())
             attributes = f'gene_id "{gene}"; gene_name "{gene}";'
             handle.write(
-                f"{chrom}\tdemo\tgene\t{exons[0][0] + 1}\t{exons[-1][1]}\t.\t"
+                f"chr2\tdemo\tgene\t{exons[0][0] + 1}\t{exons[-1][1]}\t.\t"
                 f"{strand}\t.\t{attributes}\n"
             )
             transcript_attributes = (
@@ -383,64 +409,91 @@ def write_rna_fusion_gtf(path: Path) -> None:
                 f'transcript_name "{transcript}";'
             )
             handle.write(
-                f"{chrom}\tdemo\ttranscript\t{exons[0][0] + 1}\t{exons[-1][1]}\t.\t"
+                f"chr2\tdemo\ttranscript\t{exons[0][0] + 1}\t{exons[-1][1]}\t.\t"
                 f"{strand}\t.\t{transcript_attributes}\n"
             )
-            for exon_index, (start, end) in enumerate(exons, 1):
-                exon_attributes = transcript_attributes + f' exon_number "{exon_index}";'
+            for exon_number, (start, end) in numbered_exons.items():
+                exon_attributes = transcript_attributes + f' exon_number "{exon_number}";'
                 handle.write(
-                    f"{chrom}\tdemo\texon\t{start + 1}\t{end}\t.\t{strand}\t.\t"
+                    f"chr2\tdemo\texon\t{start + 1}\t{end}\t.\t{strand}\t.\t"
                     f"{exon_attributes}\n"
                 )
 
 
 def write_rna_fusion_bam(path: Path, references: dict[str, str]) -> None:
-    """Simulate ordinary junctions, exon skipping, and reciprocal fusion evidence."""
+    """Simulate EML4 exon 13::ALK exon 20 (variant 1) RNA evidence."""
+    reference = references["chr2"]
     header = pysam.AlignmentHeader.from_dict({
         "HD": {"VN": "1.6", "SO": "coordinate"},
-        "SQ": [{"SN": chrom, "LN": len(references[chrom])} for chrom in RNA_CHROMS],
-        "RG": [{"ID": "RNA", "SM": "RNA_fusion_demo", "PL": "ILLUMINA"}],
+        "SQ": [{"SN": "chr2", "LN": GRCH37_CHR2_LENGTH}],
+        "RG": [{"ID": "RNA", "SM": "EML4_ALK_V1_RNA", "PL": "ILLUMINA"}],
     })
+    rng = Random(24_004)
     reads = []
 
-    def add_spliced(chrom, name, left_start, donor, acceptor, count, reverse=False):
+    def sequence_with_errors(start, end):
+        sequence = list(reference[start:end])
+        qualities = [38] * len(sequence)
+        add_sequencing_errors(sequence, qualities, rng, SEQUENCING_ERROR_RATE)
+        return "".join(sequence), qualities
+
+    def add_spliced(name, left_start, donor, acceptor, count, reverse=False):
         left_length = donor - left_start
-        right_length = 50
+        right_length = 60
         intron = acceptor - donor
         for index in range(count):
-            jitter = index % 3
+            jitter = index % 5
             start = left_start - jitter
             adjusted_left = left_length + jitter
-            sequence = (
-                references[chrom][start:donor]
-                + references[chrom][acceptor:acceptor + right_length]
-            )
+            sequence = list(reference[start:donor] + reference[acceptor:acceptor + right_length])
+            qualities = [38] * len(sequence)
+            add_sequencing_errors(sequence, qualities, rng, SEQUENCING_ERROR_RATE)
             read = pysam.AlignedSegment(header)
             read.query_name = f"{name}_{index + 1:03d}"
-            read.query_sequence = sequence
+            read.query_sequence = "".join(sequence)
             read.flag = 16 if reverse else 0
-            read.reference_id = RNA_CHROMS.index(chrom)
+            read.reference_id = 0
             read.reference_start = start
-            read.mapping_quality = 60
+            read.mapping_quality = max(48, min(60, round(rng.gauss(58, 2))))
             read.cigar = [(0, adjusted_left), (3, intron), (0, right_length)]
-            read.query_qualities = pysam.qualitystring_to_array("I" * len(sequence))
+            read.query_qualities = qualities
             read.set_tag("RG", "RNA")
+            read.set_tag("NH", 1)
             reads.append(read)
 
-    add_spliced("chrRNA1", "GENEA_junction_1", 600, 650, 900, 24)
-    add_spliced("chrRNA1", "GENEA_junction_2", 1000, 1050, 1300, 18)
-    add_spliced("chrRNA1", "GENEA_exon_skip", 600, 650, 1300, 7)
-    add_spliced("chrRNA2", "GENEB_junction", 2600, 2650, 2900, 20, reverse=True)
+    add_spliced("EML4_e12_e13", EML4_EXONS[12][1] - 60,
+                EML4_EXONS[12][1], EML4_EXONS[13][0], 34)
+    add_spliced("EML4_e13_e14", EML4_EXONS[13][1] - 55,
+                EML4_EXONS[13][1], EML4_EXONS[14][0], 8)
+    add_spliced("ALK_e21_e20", ALK_EXONS[21][1] - 60,
+                ALK_EXONS[21][1], ALK_EXONS[20][0], 24, reverse=True)
+    add_spliced("ALK_e20_e19", ALK_EXONS[20][1] - 55,
+                ALK_EXONS[20][1], ALK_EXONS[19][0], 28, reverse=True)
 
-    # Reciprocal SA records for ten split reads at the GENEA--GENEB breakpoint.
-    for index in range(10):
-        jitter = index % 3
-        first_start = 1300 + jitter
-        second_start = 2500 + jitter
-        first_sequence = references["chrRNA1"][first_start:first_start + 50]
-        second_sequence = references["chrRNA2"][second_start:second_start + 50]
-        query_sequence = first_sequence + second_sequence
-        query_name = f"GENEA_GENEB_split_{index + 1:02d}"
+    # Eighteen split fragments cross the mature V1 junction. The EML4 segment
+    # ends at exon 13 and the reverse-strand ALK segment ends at exon 20.
+    eml4_rna_breakpoint = EML4_EXONS[13][1]
+    alk_rna_breakpoint = ALK_EXONS[20][1]
+    for index in range(18):
+        jitter = index % 5 - 2
+        first_start = eml4_rna_breakpoint - 55 + jitter
+        second_start = alk_rna_breakpoint - 55 + jitter
+        first_sequence = reference[first_start:first_start + 55]
+        # BAM stores aligned bases in reference orientation even when FLAG 0x10
+        # records the segment's reverse strand.
+        second_sequence = reference[second_start:second_start + 55]
+        query_sequence = list(first_sequence + second_sequence)
+        qualities = [38] * len(query_sequence)
+        add_sequencing_errors(query_sequence, qualities, rng, SEQUENCING_ERROR_RATE)
+        query_sequence = "".join(query_sequence)
+        supplementary_sequence = list(second_sequence + first_sequence)
+        supplementary_qualities = [38] * len(supplementary_sequence)
+        add_sequencing_errors(
+            supplementary_sequence, supplementary_qualities, rng,
+            SEQUENCING_ERROR_RATE,
+        )
+        supplementary_sequence = "".join(supplementary_sequence)
+        query_name = f"EML4e13_ALKe20_split_{index + 1:02d}"
 
         primary = pysam.AlignedSegment(header)
         primary.query_name = query_name
@@ -449,55 +502,187 @@ def write_rna_fusion_bam(path: Path, references: dict[str, str]) -> None:
         primary.reference_id = 0
         primary.reference_start = first_start
         primary.mapping_quality = 60
-        primary.cigar = [(0, 50), (4, 50)]
-        primary.query_qualities = pysam.qualitystring_to_array("I" * 100)
-        primary.set_tag("SA", f"chrRNA2,{second_start + 1},+,50S50M,58,1;")
+        primary.cigar = [(0, 55), (4, 55)]
+        primary.query_qualities = qualities
+        primary.set_tag("SA", f"chr2,{second_start + 1},-,55M55S,58,1;")
         primary.set_tag("RG", "RNA")
+        primary.set_tag("NH", 1)
         reads.append(primary)
 
         supplementary = pysam.AlignedSegment(header)
         supplementary.query_name = query_name
-        supplementary.query_sequence = query_sequence
-        supplementary.flag = 2048
-        supplementary.reference_id = 1
+        supplementary.query_sequence = supplementary_sequence
+        supplementary.flag = 2048 | 16
+        supplementary.reference_id = 0
         supplementary.reference_start = second_start
         supplementary.mapping_quality = 58
-        supplementary.cigar = [(4, 50), (0, 50)]
-        supplementary.query_qualities = pysam.qualitystring_to_array("I" * 100)
-        supplementary.set_tag("SA", f"chrRNA1,{first_start + 1},+,50M50S,60,1;")
+        supplementary.cigar = [(0, 55), (4, 55)]
+        supplementary.query_qualities = supplementary_qualities
+        supplementary.set_tag("SA", f"chr2,{first_start + 1},+,55M55S,60,1;")
         supplementary.set_tag("RG", "RNA")
+        supplementary.set_tag("NH", 1)
         reads.append(supplementary)
 
-    # Six paired fragments span the fusion without crossing it in either read.
-    for index in range(6):
-        first_start = 1250
-        second_start = 2500
-        query_name = f"GENEA_GENEB_pair_{index + 1:02d}"
-        for read_side, chrom_index, start, mate_index, mate_start, reverse in (
-            (1, 0, first_start, 1, second_start, False),
-            (2, 1, second_start, 0, first_start, True),
+    # Ten spanning fragments add paired-end support without either read itself
+    # crossing the chimeric junction.
+    for index in range(10):
+        first_start = eml4_rna_breakpoint - 100 - index % 4
+        second_start = alk_rna_breakpoint - 100 - index % 4
+        query_name = f"EML4e13_ALKe20_pair_{index + 1:02d}"
+        for read_side, start, mate_start, reverse, mate_reverse in (
+            (1, first_start, second_start, False, False),
+            (2, second_start, first_start, False, False),
         ):
-            sequence = references[RNA_CHROMS[chrom_index]][start:start + 100]
+            sequence, qualities = sequence_with_errors(start, start + 100)
             read = pysam.AlignedSegment(header)
             read.query_name = query_name
             read.query_sequence = sequence
             read.flag = (
                 1 | (64 if read_side == 1 else 128)
                 | (16 if reverse else 0)
-                | (32 if read_side == 1 else 0)
+                | (32 if mate_reverse else 0)
             )
-            read.reference_id = chrom_index
+            read.reference_id = 0
             read.reference_start = start
             read.mapping_quality = 55
             read.cigar = [(0, 100)]
-            read.next_reference_id = mate_index
+            read.next_reference_id = 0
             read.next_reference_start = mate_start
             read.template_length = 0
-            read.query_qualities = pysam.qualitystring_to_array("I" * 100)
+            read.query_qualities = qualities
             read.set_tag("RG", "RNA")
+            read.set_tag("NH", 1)
             reads.append(read)
 
     reads.sort(key=lambda read: (read.reference_id, read.reference_start, read.query_name))
+    with pysam.AlignmentFile(str(path), "wb", header=header) as bam:
+        for read in reads:
+            bam.write(read)
+    index_path = Path(f"{path}.bai")
+    if index_path.exists():
+        index_path.unlink()
+    pysam.index(str(path))
+
+
+def write_eml4_alk_dna_bam(path: Path, references: dict[str, str]) -> None:
+    """Simulate heterozygous DNA evidence for the EML4::ALK inversion."""
+    reference = references["chr2"]
+    header = pysam.AlignmentHeader.from_dict({
+        "HD": {"VN": "1.6", "SO": "coordinate"},
+        "SQ": [{"SN": "chr2", "LN": GRCH37_CHR2_LENGTH}],
+        "RG": [{"ID": "DNA", "SM": "EML4_ALK_inversion_DNA", "PL": "ILLUMINA"}],
+    })
+    rng = Random(24_005)
+    reads = []
+
+    def make_read(name, start, length=150, reverse=False, mapq=60):
+        sequence = list(reference[start:start + length])
+        qualities = [38] * len(sequence)
+        add_sequencing_errors(sequence, qualities, rng, SEQUENCING_ERROR_RATE)
+        read = pysam.AlignedSegment(header)
+        read.query_name = name
+        read.query_sequence = "".join(sequence)
+        read.flag = 16 if reverse else 0
+        read.reference_id = 0
+        read.reference_start = start
+        read.mapping_quality = mapq
+        read.cigar = [(0, length)]
+        read.query_qualities = qualities
+        read.set_tag("RG", "DNA")
+        return read
+
+    # Approximately 15x local reference support from ordinary 350-bp FR
+    # fragments, with start and MAPQ variation and a sparse error model.
+    for locus_name, window_start, window_end in (
+        ("ALK", ALK_DNA_BREAKPOINT - 1_650, ALK_DNA_BREAKPOINT + 1_650),
+        ("EML4", EML4_DNA_BREAKPOINT - 1_450, EML4_DNA_BREAKPOINT + 1_450),
+    ):
+        for index in range(132):
+            fragment_length = max(300, min(430, round(rng.gauss(355, 30))))
+            first_start = rng.randint(window_start, window_end - fragment_length)
+            second_start = first_start + fragment_length - 150
+            query_name = f"DNA_{locus_name}_concordant_{index + 1:03d}"
+            first = make_read(query_name, first_start, mapq=rng.randint(48, 60))
+            second = make_read(query_name, second_start, reverse=True, mapq=rng.randint(48, 60))
+            first.flag = 1 | 2 | 64 | 32
+            second.flag = 1 | 2 | 128 | 16
+            first.next_reference_id = second.next_reference_id = 0
+            first.next_reference_start = second_start
+            second.next_reference_start = first_start
+            first.template_length = fragment_length
+            second.template_length = -fragment_length
+            reads.extend((first, second))
+
+    # Split reads directly resolve the two intronic DNA breakpoints. Their
+    # opposite SA strands encode the inversion rather than a deletion.
+    for index in range(10):
+        jitter = index % 5 - 2
+        eml4_start = EML4_DNA_BREAKPOINT - 60 + jitter
+        alk_start = ALK_DNA_BREAKPOINT + jitter
+        eml4_sequence = reference[eml4_start:eml4_start + 60]
+        alk_sequence = reference[alk_start:alk_start + 60]
+        query = list(eml4_sequence + alk_sequence)
+        qualities = [38] * len(query)
+        add_sequencing_errors(query, qualities, rng, SEQUENCING_ERROR_RATE)
+        supplementary_query = list(alk_sequence + eml4_sequence)
+        supplementary_qualities = [38] * len(supplementary_query)
+        add_sequencing_errors(
+            supplementary_query, supplementary_qualities, rng,
+            SEQUENCING_ERROR_RATE,
+        )
+        query_name = f"DNA_inv2_split_{index + 1:02d}"
+
+        primary = pysam.AlignedSegment(header)
+        primary.query_name = query_name
+        primary.query_sequence = "".join(query)
+        primary.flag = 0
+        primary.reference_id = 0
+        primary.reference_start = eml4_start
+        primary.mapping_quality = 60
+        primary.cigar = [(0, 60), (4, 60)]
+        primary.query_qualities = qualities
+        primary.set_tag("SA", f"chr2,{alk_start + 1},-,60S60M,58,1;")
+        primary.set_tag("RG", "DNA")
+        reads.append(primary)
+
+        supplementary = pysam.AlignedSegment(header)
+        supplementary.query_name = query_name
+        supplementary.query_sequence = "".join(supplementary_query)
+        supplementary.flag = 2048 | 16
+        supplementary.reference_id = 0
+        supplementary.reference_start = alk_start
+        supplementary.mapping_quality = 58
+        supplementary.cigar = [(4, 60), (0, 60)]
+        supplementary.query_qualities = supplementary_qualities
+        supplementary.set_tag("SA", f"chr2,{eml4_start + 1},+,60M60S,60,1;")
+        supplementary.set_tag("RG", "DNA")
+        reads.append(supplementary)
+
+    # Same-strand pairs are the characteristic short-read geometry of an
+    # inversion. Model both reciprocal junction orientations (FF and RR).
+    for orientation, count in (("FF", 10), ("RR", 7)):
+        for index in range(count):
+            jitter = index % 5 - 2
+            if orientation == "FF":
+                eml4_start = EML4_DNA_BREAKPOINT - 150 + jitter
+                alk_start = ALK_DNA_BREAKPOINT - 150 + jitter
+                reverse = False
+            else:
+                eml4_start = EML4_DNA_BREAKPOINT + jitter
+                alk_start = ALK_DNA_BREAKPOINT + jitter
+                reverse = True
+            query_name = f"DNA_inv2_{orientation}_{index + 1:02d}"
+            eml4 = make_read(query_name, eml4_start, reverse=reverse, mapq=56)
+            alk = make_read(query_name, alk_start, reverse=reverse, mapq=56)
+            eml4.flag = 1 | 64 | (16 if reverse else 0) | (32 if reverse else 0)
+            alk.flag = 1 | 128 | (16 if reverse else 0) | (32 if reverse else 0)
+            eml4.next_reference_id = alk.next_reference_id = 0
+            eml4.next_reference_start = alk_start
+            alk.next_reference_start = eml4_start
+            eml4.template_length = alk.template_length = 0
+            reads.extend((eml4, alk))
+
+    reads.sort(key=lambda read: (read.reference_id, read.reference_start, read.query_name, read.flag))
     with pysam.AlignmentFile(str(path), "wb", header=header) as bam:
         for read in reads:
             bam.write(read)
@@ -1315,6 +1500,9 @@ def main() -> None:
     write_rna_fusion_gtf(ANNOTATIONS_DIR / "demo_rna_fusion.gtf")
     write_rna_fusion_bam(
         ALIGNMENTS_DIR / "demo_rna_fusion.bam", rna_references
+    )
+    write_eml4_alk_dna_bam(
+        ALIGNMENTS_DIR / "demo_eml4_alk_dna.bam", rna_references
     )
     write_long_read_bam(
         ALIGNMENTS_DIR / "demo_long_reads.bam", long_reference

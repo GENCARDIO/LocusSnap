@@ -1214,6 +1214,64 @@ def test_rna_fusion_track_labels_split_and_pair_support():
     assert to_hex(ax.patches[0].get_edgecolor()) == DEFAULT_VISUAL_COLORS["fusion_split"]
     plt.close(fig)
 
+    local_item = AnnotationItem(
+        90, 180, "TX1", "+", blocks=[(90, 180)], group_label="EML4"
+    )
+    partner_item = AnnotationItem(
+        480, 580, "TX2", "-", blocks=[(480, 580)], group_label="ALK"
+    )
+    local_track = LoadedAnnotationTrack(
+        "Genes", "gtf", "#17217a", [local_item], [[local_item]], chrom="chr1"
+    )
+    partner_track = LoadedAnnotationTrack(
+        "Genes", "gtf", "#17217a", [partner_item], [[partner_item]], chrom="chr2"
+    )
+    fig, ax = plt.subplots()
+
+    renderer.draw_sashimi_track(
+        ax, [read], 80, 180, chrom="chr1",
+        genomic_tracks=[local_track, partner_track],
+    )
+
+    assert any("EML4 → ALK · S1/P0" == text.get_text() for text in ax.texts)
+    plt.close(fig)
+
+
+def test_gene_track_option_draws_available_exon_numbers():
+    item = AnnotationItem(
+        100, 210, "TX1", "+", blocks=[(100, 130), (180, 210)],
+        exon_labels=[(100, 130, "12"), (180, 210, "13")],
+    )
+    track = LoadedAnnotationTrack("Genes", "gtf", "#17217a", [item], [[item]])
+    renderer = AlignmentRenderer(show_exon_numbers=True)
+    fig, ax = plt.subplots(figsize=(8, 1), dpi=100)
+    ax.set_xlim(90, 220)
+
+    renderer.draw_annotation_track(ax, track, 90, 220)
+
+    assert {text.get_text() for text in ax.texts} >= {"12", "13"}
+    plt.close(fig)
+
+
+def test_multi_sample_rna_track_can_be_limited_to_selected_panels(tmp_path):
+    renderer = AlignmentRenderer(
+        show_sashimi=True, show_coverage=False, show_legend=False,
+        show_ideogram=False, shade_by_mapq=False,
+    )
+    calls = []
+    renderer.draw_sashimi_track = lambda *args, **kwargs: calls.append(kwargs["chrom"])
+    panels = [
+        {"label": "DNA", "rows": [], "show_rna_evidence": False},
+        {"label": "RNA", "rows": [], "show_rna_evidence": True},
+    ]
+
+    renderer.render_multi(
+        panels, "chr2", 100, 200, reference=None,
+        out_path=str(tmp_path / "selected-rna.png"),
+    )
+
+    assert calls == ["chr2"]
+
 
 def test_ideogram_marks_the_window_in_red():
     renderer = AlignmentRenderer()

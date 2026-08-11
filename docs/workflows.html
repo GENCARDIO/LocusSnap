@@ -74,6 +74,20 @@
   --output_name rna-review</code></pre>
           <ul><li><strong>K</strong> denotes an annotated exon boundary; <strong>N</strong> denotes a novel junction.</li><li>Full labels add canonical motifs such as <code>GT-AG</code>.</li><li>Fusion support is labelled <code>S#/P#</code> for unique split reads and spanning pairs.</li></ul>
 
+          <h3>Corroborate a fusion across DNA and RNA</h3>
+          <p>Repeat both BAM arguments and both breakpoint regions to make a sample-by-locus matrix. For EML4::ALK V1, the DNA rows should expose the large intrachromosomal inversion through same-strand pairs and split alignments, while the RNA rows should terminate at EML4 exon 13 and resume at ALK exon 20.</p>
+          <pre><code>locus-snap \
+  --bam tumour-dna.bam --bam tumour-rna.bam \
+  --sample_label 'DNA-seq · inv(2)' \
+  --sample_label 'RNA-seq · EML4(e13)::ALK(e20), V1' \
+  --region chr2:29445751-29448650 \
+  --region chr2:42521851-42523650 \
+  --track transcripts.gtf.gz \
+  --rna_mode --rna_sample 2 \
+  --show_exon_numbers --view_as_pairs --link_breakpoints \
+  --fusion_min_distance 1000000 \
+  --output_name eml4-alk-dna-rna</code></pre>
+
           <h2 id="long-reads">Long reads and base modifications</h2>
           <pre><code>locus-snap \
   --bam nanopore.bam \

@@ -164,36 +164,41 @@ python3 -m locus_snap \
   --dpi 140
 
 python3 -m locus_snap \
+  --bam out/demo_data/alignments/demo_eml4_alk_dna.bam \
   --bam out/demo_data/alignments/demo_rna_fusion.bam \
-  --sample_label 'RNA-seq · annotated and novel junctions · GENEA–GENEB fusion' \
-  --fasta out/demo_data/reference/demo_rna_fusion_reference.fa \
-  --region chrRNA1:451-1550 \
-  --region chrRNA2:2401-3150 \
-  --region_label 'GENEA splice and fusion breakpoint' \
-  --region_label 'GENEB reciprocal fusion breakpoint' \
-  --custom_track 'out/demo_data/annotations/demo_rna_fusion.gtf,gtf,Fusion partner transcripts,#17217a,collapse,0.58' \
+  --sample_label 'DNA-seq · heterozygous inv(2), 13.1 Mb' \
+  --sample_label 'RNA-seq · EML4(e13)::ALK(e20), V1' \
+  --fasta out/demo_data/reference/demo_rna_fusion_reference.fa.gz \
+  --region chr2:29445751-29448650 \
+  --region chr2:42521851-42523650 \
+  --region_label 'ALK · intron 19 DNA breakpoint / exon 20 RNA junction' \
+  --region_label 'EML4 · intron 13 DNA breakpoint / exon 13 RNA junction' \
+  --custom_track 'out/demo_data/annotations/demo_rna_fusion.gtf,gtf,EML4 and ALK transcripts (GRCh37),#17217a,collapse,0.64' \
   --rna_mode \
+  --rna_sample 2 \
+  --show_exon_numbers \
   --min_junction_reads 3 \
   --min_junction_anchor 12 \
   --sashimi_strand split \
-  --rna_strandness forward \
+  --rna_strandness alignment \
   --junction_labels full \
   --min_fusion_reads 3 \
-  --fusion_breakpoint_tolerance 10 \
-  --fusion_min_distance 500 \
+  --fusion_breakpoint_tolerance 15 \
+  --fusion_min_distance 1000000 \
   --min_fusion_mapq 20 \
+  --view_as_pairs \
+  --link_breakpoints \
   --display_mode squish \
   --layout pack \
-  --sort_by start \
-  --max_rows 48 \
+  --sort_by sa_count \
+  --max_rows 38 \
   --max_alignment_depth 0 \
-  --no_pair_colors \
-  --no_ideogram \
-  --genome none \
+  --grid_mode major_minor \
+  --genome hg19 \
   --refseq none \
   --output_dir out \
   --output_name 41_rnaseq_junction_fusion \
-  --fig_width 16 \
+  --fig_width 17 \
   --dpi 150
 
 python3 -m locus_snap \

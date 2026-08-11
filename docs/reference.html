@@ -48,6 +48,7 @@
           <div class="option-group">
             <div class="option-row"><code>--sashimi</code><span>Count-labelled CIGAR-N splice-junction arcs.</span></div>
             <div class="option-row"><code>--rna_mode</code><span>Classified junctions plus clustered fusion evidence.</span></div>
+            <div class="option-row"><code>--rna_sample N</code><span>Restrict RNA evidence to repeated BAM sample N (1-based); repeatable.</span></div>
             <div class="option-row"><code>--min_junction_reads N</code><span>Minimum unique supporting read names.</span></div>
             <div class="option-row"><code>--min_junction_anchor BP</code><span>Matched bases required on both junction sides.</span></div>
             <div class="option-row"><code>--sashimi_strand MODE</code><span><code>combined</code> or mirrored <code>split</code> arcs.</span></div>
@@ -59,7 +60,7 @@
 
           <h2 id="tracks">Supported tracks</h2>
           <table><thead><tr><th>Data</th><th>Recognized formats</th><th>Notes</th></tr></thead><tbody>
-            <tr><td>Gene models</td><td>BED/BED12, GFF, GFF3, GTF</td><td>Transcript grouping, coding/UTR blocks, strand arrows, primary isoforms.</td></tr>
+            <tr><td>Gene models</td><td>BED/BED12, GFF, GFF3, GTF</td><td>Transcript grouping, coding/UTR blocks, strand arrows, primary isoforms, and optional <code>--show_exon_numbers</code>.</td></tr>
             <tr><td>Variants</td><td>VCF, VCF.GZ, BCF</td><td>SNVs, indels, symbolic alleles, and BND partners.</td></tr>
             <tr><td>Peaks</td><td>narrowPeak, broadPeak, peak</td><td>Interval or density display.</td></tr>
             <tr><td>Signal</td><td>BigWig, bedGraph, signal</td><td>Self-indexed BigWig; signed log2/CNV modes available.</td></tr>
